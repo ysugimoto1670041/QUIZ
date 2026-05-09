@@ -8,5 +8,5 @@
 //   RLS(Row Level Security)を適切に設定してください(README参照)。
 // =============================================================
 
-const SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co";
-const SUPABASE_ANON_KEY = "YOUR_ANON_KEY";
+const SUPABASE_URL = "https://vsyukcyuxrfymsmvrite.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_8_NBHUIg-ZQts_7GhyPIRA_qaLfzlHK";

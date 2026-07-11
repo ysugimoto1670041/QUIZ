@@ -1,3 +1,12 @@
+// ========== モード判定 ==========
+// ?preview=1 が付いていると「プレビューモード」:
+// 名前入力をスキップし、DBには一切書き込まず、クイズの流れだけを観戦する。
+// 管理者画面のスマホプレビューで使用。
+const PREVIEW = new URLSearchParams(location.search).has('preview');
+
+// カウントダウン演出の長さ(全員共通のオフセットとして扱うため定数)
+const COUNTDOWN_MS = 3000;
+
 // ========== Supabase初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -28,8 +37,13 @@ let currentQuiz = null;
 let currentIdx = -1;
 let lastState = null;
 let timerInterval = null;
+let countdownInterval = null;
 let mySelected = -1;
-let myAnsweredAt = 0;
+
+// 実効的な回答開始時刻 (カウントダウン分を全クライアント共通で加算)
+function effectiveStart(q) {
+  return (q.question_started_at || 0) + COUNTDOWN_MS;
+}
 
 // ========== 効果音 ==========
 let audioCtx = null;
@@ -72,6 +86,10 @@ function playWrong() {
 
 function playTick() { playTone(800, 0.05, 'square', 0.05); }
 function playSelect() { playTone(600, 0.1, 'sine', 0.1); }
+function playCountBeep(final) {
+  if (final) playTone(880, 0.4, 'square', 0.14);
+  else playTone(440, 0.15, 'square', 0.1);
+}
 function playStart() {
   [400, 600, 800].forEach((f, i) => setTimeout(() => playTone(f, 0.15, 'square', 0.1), i * 100));
 }
@@ -90,7 +108,6 @@ window.joinQuiz = async function() {
   getAudioCtx();
   playStart();
 
-  // upsert で再参加にも対応(同一IDなら上書き、スコアは保持)
   const { data: existing } = await sb.from('players').select('score').eq('id', myId).maybeSingle();
   const score = existing ? existing.score : 0;
   const { error } = await sb.from('players').upsert({
@@ -127,16 +144,14 @@ async function fetchQuiz() {
 }
 
 async function startWatchQuiz() {
-  // 初回読み込み
   const initial = await fetchQuiz();
   if (initial) {
     currentQuiz = initial;
     handleStateChange(initial);
   }
 
-  // リアルタイム購読
-  sb.channel('player-watch')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_state', filter: `id=eq.${QUIZ_ROW_ID}` }, async (payload) => {
+  sb.channel('player-watch-' + Math.random().toString(36).slice(2, 8))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_state', filter: `id=eq.${QUIZ_ROW_ID}` }, (payload) => {
       const q = payload.new;
       if (!q) return;
       currentQuiz = q;
@@ -156,7 +171,6 @@ function handleStateChange(q) {
     if (lastState !== stateKey) {
       currentIdx = idx;
       mySelected = -1;
-      myAnsweredAt = 0;
       showQuestion(q);
     } else {
       if (!timerInterval) startTimer(q);
@@ -200,7 +214,51 @@ function showQuestion(q) {
 
   document.getElementById('answered-status').classList.add('hidden');
   showScreen('question');
-  startTimer(q);
+
+  // カウントダウン演出 (開始時刻より前ならカウントダウンを表示)
+  const effStart = effectiveStart(q);
+  if (Date.now() < effStart) {
+    choicesEl.classList.add('locked');
+    showCountdown(effStart, () => {
+      choicesEl.classList.remove('locked');
+      startTimer(q);
+    });
+  } else {
+    // 遅れて合流した場合はカウントダウンなしで即開始
+    choicesEl.classList.remove('locked');
+    startTimer(q);
+  }
+}
+
+function showCountdown(effStart, onDone) {
+  clearInterval(countdownInterval);
+  const existing = document.getElementById('countdown-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'countdown-overlay';
+  document.body.appendChild(overlay);
+
+  let lastShown = -1;
+  function tick() {
+    const remaining = effStart - Date.now();
+    if (remaining <= 0) {
+      clearInterval(countdownInterval);
+      countdownInterval = null;
+      overlay.remove();
+      playCountBeep(true);
+      onDone();
+      return;
+    }
+    const sec = Math.ceil(remaining / 1000);
+    if (sec !== lastShown) {
+      lastShown = sec;
+      overlay.innerHTML = `<div class="countdown-num">${sec}</div>`;
+      playCountBeep(false);
+    }
+  }
+  tick();
+  countdownInterval = setInterval(tick, 100);
 }
 
 function escapeHtml(s) {
@@ -211,7 +269,7 @@ function escapeHtml(s) {
 function startTimer(q) {
   clearInterval(timerInterval);
   const limit = (q.time_limit || 20) * 1000;
-  const startedAt = q.question_started_at || Date.now();
+  const startedAt = effectiveStart(q);
   const fillEl = document.getElementById('timer-fill');
   const textEl = document.getElementById('timer-text');
   fillEl.classList.remove('warn');
@@ -220,7 +278,7 @@ function startTimer(q) {
   timerInterval = setInterval(() => {
     const elapsed = Date.now() - startedAt;
     const remaining = Math.max(0, limit - elapsed);
-    const pct = (remaining / limit) * 100;
+    const pct = Math.min(100, (remaining / limit) * 100);
     fillEl.style.width = pct + '%';
     const sec = Math.ceil(remaining / 1000);
     textEl.textContent = sec + '秒';
@@ -232,7 +290,7 @@ function startTimer(q) {
     if (remaining <= 0) {
       clearInterval(timerInterval);
       timerInterval = null;
-      if (mySelected < 0) {
+      if (!PREVIEW && mySelected < 0) {
         submitAnswer(-1);
       }
     }
@@ -241,8 +299,9 @@ function startTimer(q) {
 
 // ========== 回答 ==========
 window.selectAnswer = function(i) {
+  if (PREVIEW) return; // プレビューでは回答不可
   if (mySelected >= 0) return;
-  if (currentQuiz.state !== 'question') return;
+  if (!currentQuiz || currentQuiz.state !== 'question') return;
   mySelected = i;
   playSelect();
 
@@ -256,12 +315,10 @@ window.selectAnswer = function(i) {
 
 async function submitAnswer(i) {
   const idx = currentQuiz.current_idx;
-  const startedAt = currentQuiz.question_started_at || Date.now();
+  const startedAt = effectiveStart(currentQuiz);
   const limit = (currentQuiz.time_limit || 20) * 1000;
-  const elapsedMs = (i < 0) ? limit : (Date.now() - startedAt);
-  myAnsweredAt = elapsedMs;
+  const elapsedMs = (i < 0) ? limit : Math.max(0, Date.now() - startedAt);
 
-  // 同じプレイヤーの同じ問題への重複回答を避けるため upsert
   const { error } = await sb.from('answers').upsert({
     q_idx: idx,
     player_id: myId,
@@ -280,11 +337,27 @@ async function submitAnswer(i) {
 // ========== 解答発表 ==========
 async function revealAnswer(q) {
   clearInterval(timerInterval); timerInterval = null;
+  clearInterval(countdownInterval); countdownInterval = null;
+  const cdOverlay = document.getElementById('countdown-overlay');
+  if (cdOverlay) cdOverlay.remove();
+
   const idx = q.current_idx;
   const question = q.questions[idx];
+  if (!question) return;
   const correct = question.correct;
 
-  // 全員の回答を取得
+  // 正解の選択肢をハイライト
+  const choicesEl = document.getElementById('choices');
+  choicesEl.classList.remove('locked');
+  document.querySelectorAll('.choice').forEach((el, idx2) => {
+    el.disabled = true;
+    if (idx2 === correct) el.classList.add('correct-reveal');
+    else el.classList.add('wrong-reveal');
+  });
+
+  if (PREVIEW) return; // プレビューは正解表示のみで終了
+
+  // 回答を取得して得点計算
   const { data: answers, error } = await sb.from('answers').select('*').eq('q_idx', idx);
   if (error) console.error(error);
   const ans = answers || [];
@@ -292,7 +365,6 @@ async function revealAnswer(q) {
   const myAns = ans.find(a => a.player_id === myId);
   const myCorrect = myAns && myAns.choice === correct;
 
-  // スコア計算
   let myPointsThisRound = 0;
   if (myCorrect) {
     const limit = (q.time_limit || 20) * 1000;
@@ -302,19 +374,9 @@ async function revealAnswer(q) {
     myPointsThisRound = 100 + speedBonus + rarityBonus;
   }
 
-  // ボタンに正誤表示
-  document.querySelectorAll('.choice').forEach((el, idx2) => {
-    el.disabled = true;
-    if (idx2 === correct) el.classList.add('correct-reveal');
-    else if (mySelected === idx2) el.classList.add('wrong-reveal');
-    else el.classList.add('wrong-reveal');
-  });
-
   showRevealOverlay(myCorrect, myPointsThisRound);
 
-  // スコア更新 (RPCで原子的に加算)
   if (myCorrect && myPointsThisRound > 0) {
-    // 競合を避けるため、現在のスコアを取得してから加算
     const { data: currentPlayer } = await sb.from('players').select('score').eq('id', myId).maybeSingle();
     const newScore = (currentPlayer ? currentPlayer.score : 0) + myPointsThisRound;
     await sb.from('players').update({ score: newScore }).eq('id', myId);
@@ -326,6 +388,7 @@ function showRevealOverlay(correct, points) {
   if (existing) existing.remove();
   const overlay = document.createElement('div');
   overlay.id = 'reveal-overlay';
+  overlay.classList.add('flash-bg');
   overlay.innerHTML = `
     <div class="reveal-content">
       <div class="reveal-emoji">${correct ? '🎉' : '😢'}</div>
@@ -359,7 +422,7 @@ function fireConfetti() {
   const ctx = canvas.getContext('2d');
   const colors = ['#ff2d1f', '#d6285c', '#ffd54a', '#ff7eb3', '#42a5f5', '#66bb6a'];
   const particles = [];
-  for (let i = 0; i < 80; i++) {
+  for (let i = 0; i < 90; i++) {
     particles.push({
       x: Math.random() * canvas.width,
       y: -20,
@@ -409,7 +472,6 @@ async function showResult() {
   if (error) console.error(error);
   const arr = (data || []).map(p => ({ id: p.id, name: p.name, score: p.score || 0 }));
 
-  // 表彰台 (top 3)
   const podium = document.getElementById('podium');
   podium.innerHTML = '';
   const top3Order = [1, 0, 2];
@@ -428,29 +490,40 @@ async function showResult() {
     podium.appendChild(div);
   });
 
-  // 完全ランキング
   const rankFull = document.getElementById('ranking-full');
   rankFull.innerHTML = arr.map((p, i) => {
-    const isMe = p.id === myId;
+    const isMe = !PREVIEW && p.id === myId;
     const isTop5 = i < 5;
     const crown = ['👑','🥈','🥉','🏅','🏅'][i] || '';
-    return `<div class="rank-row ${isMe ? 'me' : ''} ${isTop5 ? 'top5' : ''}" style="animation-delay: ${i * 0.05}s">
+    return `<div class="rank-row ${isMe ? 'me' : ''} ${isTop5 ? 'top5' : ''}" style="animation-delay: ${i * 0.06}s">
       <div class="rank-pos">${crown || (i + 1)}</div>
       <div class="rank-name">${escapeHtml(p.name)}${isMe ? ' (あなた)' : ''}</div>
       <div class="rank-score">${p.score}</div>
     </div>`;
   }).join('');
 
-  const myRank = arr.findIndex(p => p.id === myId);
-  if (myRank >= 0 && myRank < 5) {
-    setTimeout(fireConfetti, 500);
-    setTimeout(playFanfareCorrect, 800);
+  if (!PREVIEW) {
+    const myRank = arr.findIndex(p => p.id === myId);
+    if (myRank >= 0 && myRank < 5) {
+      setTimeout(fireConfetti, 500);
+      setTimeout(playFanfareCorrect, 800);
+    }
   }
 }
 
 // ========== 起動 ==========
 document.addEventListener('DOMContentLoaded', () => {
   if (!initSupabase()) return;
+
+  if (PREVIEW) {
+    // プレビューモード: 名前入力をスキップして観戦開始
+    document.body.classList.add('preview');
+    document.getElementById('screen-entry').classList.add('hidden');
+    showScreen('waiting');
+    document.getElementById('waiting-name').textContent = '👁 プレビュー中';
+    startWatchQuiz();
+    return;
+  }
 
   const savedName = localStorage.getItem('ltcb_player_name');
   if (savedName) {

@@ -234,27 +234,6 @@ document.getElementById('time-limit').addEventListener('change', saveLocal);
 document.getElementById('q-count').addEventListener('change', saveLocal);
 
 // ========== Supabase ヘルパ ==========
-// テーブル設計:
-// quiz_state (id=1 固定の単一行)
-//   - state: text ('waiting'|'question'|'answer'|'finished')
-//   - current_idx: int
-//   - questions: jsonb (問題リスト)
-//   - time_limit: int
-//   - question_started_at: bigint (ミリ秒)
-//   - updated_at: timestamp
-// players (id=client uuid)
-//   - id: text
-//   - name: text
-//   - score: int
-//   - joined_at: timestamp
-// answers
-//   - id: bigserial
-//   - q_idx: int
-//   - player_id: text
-//   - choice: int
-//   - elapsed_ms: int
-//   - name: text
-
 const QUIZ_ROW_ID = 1;
 
 async function getQuiz() {
@@ -273,13 +252,12 @@ window.startQuiz = async function() {
   if (!sbReady) { alert('Supabaseの設定がされていません。README.mdを確認してください。'); return; }
   const qCount = Math.min(parseInt(document.getElementById('q-count').value), questions.length);
   if (qCount < 1) { alert('問題を1つ以上追加してください'); return; }
-  if (qCount > questions.length) {
-    if (!confirm(`出題数(${qCount})が問題数(${questions.length})より多いです。${questions.length}問で開始しますか?`)) return;
+  if (parseInt(document.getElementById('q-count').value) > questions.length) {
+    if (!confirm(`出題数が問題数(${questions.length})より多いです。${questions.length}問で開始しますか?`)) return;
   }
   const useQs = questions.slice(0, qCount);
   const timeLimit = parseInt(document.getElementById('time-limit').value);
 
-  // 既存の回答とプレイヤースコアをリセット(参加者は維持)
   await sb.from('answers').delete().neq('id', 0);
   await sb.from('players').update({ score: 0 }).neq('id', '');
 
@@ -346,10 +324,9 @@ function startLiveWatch() {
   if (liveWatchStarted || !sbReady) return;
   liveWatchStarted = true;
 
-  // 初回ロード
   refreshLive();
+  refreshPlayers();
 
-  // リアルタイム購読
   sb.channel('admin-watch')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_state' }, () => refreshLive())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => refreshPlayers())
@@ -383,7 +360,13 @@ async function refreshLive() {
 async function refreshPlayers() {
   const { data, error } = await sb.from('players').select('*').order('score', { ascending: false });
   if (error) { console.error(error); return; }
-  document.getElementById('stat-players').textContent = (data || []).length;
+  const stat = document.getElementById('stat-players');
+  const prev = stat.textContent;
+  stat.textContent = (data || []).length;
+  if (prev !== stat.textContent) {
+    stat.parentElement.classList.add('bump');
+    setTimeout(() => stat.parentElement.classList.remove('bump'), 400);
+  }
   renderRanking(data || []);
 }
 
@@ -408,7 +391,7 @@ function renderRanking(players) {
   }
   el.innerHTML = arr.map((p, i) => {
     const crown = i < 5 ? ['👑','🥈','🥉','🏅','🏅'][i] : '';
-    return `<div class="rank-item ${i < 5 ? 'top' : ''}">
+    return `<div class="rank-item ${i < 5 ? 'top' : ''}" style="animation-delay:${i * 0.04}s">
       <div class="rank-pos">${crown || (i + 1)}</div>
       <div class="rank-name">${escapeHtml(p.name || '?')}</div>
       <div class="rank-score">${p.score || 0}</div>
@@ -418,7 +401,7 @@ function renderRanking(players) {
 
 // ========== QRコード ==========
 function renderQRCode() {
-  const url = location.href.replace(/\/[^\/]*$/, '/play.html').replace(/index\.html$/, 'play.html');
+  const url = location.href.replace(/\/[^\/]*$/, '/play.html');
   document.getElementById('participant-url').textContent = url;
   const qrEl = document.getElementById('qrcode');
   qrEl.innerHTML = '';

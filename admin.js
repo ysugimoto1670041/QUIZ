@@ -286,6 +286,29 @@ window.endQuiz = async function() {
   await upsertQuiz({ state: 'finished' });
 }
 
+// ========== ランキング発表トグル ==========
+let rankingPrevState = null;
+
+window.toggleRanking = async function() {
+  if (!sbReady) return;
+  const quiz = await getQuiz();
+  if (!quiz) { alert('クイズが開始されていません'); return; }
+
+  if (quiz.state === 'ranking') {
+    // 元の状態に戻す
+    const prev = rankingPrevState || ((quiz.current_idx >= 0) ? 'answer' : 'waiting');
+    rankingPrevState = null;
+    await upsertQuiz({ state: prev });
+  } else {
+    if (quiz.state === 'question') {
+      alert('出題中はランキングを表示できません。解答発表の後に押してください。');
+      return;
+    }
+    rankingPrevState = quiz.state;
+    await upsertQuiz({ state: 'ranking' });
+  }
+}
+
 // ========== ライブ進行 ==========
 window.nextStep = async function() {
   const quiz = await getQuiz();
@@ -294,6 +317,11 @@ window.nextStep = async function() {
   const state = quiz.state;
   const idx = quiz.current_idx;
   const total = (quiz.questions || []).length;
+
+  if (state === 'ranking') {
+    alert('ランキング表示中です。「ランキングを閉じる」を押してから進行してください。');
+    return;
+  }
 
   if (state === 'waiting') {
     await upsertQuiz({
@@ -339,7 +367,7 @@ async function refreshLive() {
   currentLiveQuiz = quiz;
   if (!quiz) return;
 
-  const stateMap = { waiting: '⏳ 待機', question: '🎯 出題中', answer: '✨ 解答発表', finished: '🏁 終了' };
+  const stateMap = { waiting: '⏳ 待機', question: '🎯 出題中', answer: '✨ 解答発表', ranking: '🏆 ランキング', finished: '🏁 終了' };
   document.getElementById('stat-state').textContent = stateMap[quiz.state] || '-';
   document.getElementById('stat-current').textContent = quiz.current_idx >= 0 ? (quiz.current_idx + 1) + '/' + (quiz.questions || []).length : '-';
 
@@ -352,7 +380,13 @@ async function refreshLive() {
   else if (quiz.state === 'question') btn.textContent = '✨ 解答を発表';
   else if (quiz.state === 'answer') {
     btn.textContent = (quiz.current_idx + 1 >= (quiz.questions || []).length) ? '🏁 結果発表' : '▶ 次の問題へ';
-  } else btn.textContent = '✓ 終了';
+  } else if (quiz.state === 'ranking') btn.textContent = '🏆 ランキング表示中';
+  else btn.textContent = '✓ 終了';
+
+  const rankBtn = document.getElementById('btn-ranking');
+  if (rankBtn) {
+    rankBtn.textContent = (quiz.state === 'ranking') ? '✖ ランキングを閉じる' : '🏆 ランキング発表';
+  }
 
   refreshAnswers();
 }
@@ -399,6 +433,25 @@ function renderRanking(players) {
   }).join('');
 }
 
+// ========== プレビュー/テスト切替 ==========
+function setupPreviewTabs() {
+  document.querySelectorAll('.pv-tab').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.pv-tab').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      const frame = document.getElementById('preview-frame');
+      frame.src = 'play.html?' + (b.dataset.mode === 'test' ? 'test=1' : 'preview=1');
+    });
+  });
+  const reload = document.querySelector('.pv-reload');
+  if (reload) {
+    reload.addEventListener('click', () => {
+      const frame = document.getElementById('preview-frame');
+      frame.src = frame.src;
+    });
+  }
+}
+
 // ========== QRコード ==========
 function renderQRCode() {
   const url = location.href.replace(/\/[^\/]*$/, '/play.html');
@@ -418,4 +471,5 @@ document.addEventListener('DOMContentLoaded', () => {
   initSupabase();
   loadLocal();
   renderQuestionList();
+  setupPreviewTabs();
 });

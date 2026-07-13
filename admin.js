@@ -1,5 +1,5 @@
-// 同期会クイズ v1.9.1 (2026-07-13) - admin.js
-console.log('同期会クイズ v1.9.1 (2026-07-13) - admin.js loaded');
+// 同期会クイズ v1.9.2 (2026-07-13) - admin.js
+console.log('同期会クイズ v1.9.2 (2026-07-13) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;

@@ -1,5 +1,5 @@
-// 同期会クイズ v1.9 (2026-07-13) - admin.js
-console.log('同期会クイズ v1.9 (2026-07-13) - admin.js loaded');
+// 同期会クイズ v1.9.1 (2026-07-13) - admin.js
+console.log('同期会クイズ v1.9.1 (2026-07-13) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -469,9 +469,10 @@ async function refreshAnswers() {
 }
 
 // ========== 問題リストのクラウド共有 ==========
-// quiz_state テーブルの id=2 を「下書き保存」専用の行として使用する。
+// 専用テーブル quiz_draft (常に id=1 の単一行) に保存する。
 // これによりどの端末 (PC・スマホ) からも同じ最新の問題リストが表示される。
-const DRAFT_ROW_ID = 2;
+// ※ quiz_state は CHECK(id=1) 制約があり id=2 を追加できないため専用テーブルを使用
+const DRAFT_ROW_ID = 1;
 let draftSaveTimer = null;
 
 function setCloudStatus(text, color) {
@@ -488,18 +489,19 @@ function scheduleDraftSave() {
 
 async function saveDraftToCloud() {
   if (!sbReady) return;
-  const { error } = await sb.from('quiz_state').upsert({
+  const { error } = await sb.from('quiz_draft').upsert({
     id: DRAFT_ROW_ID,
-    state: 'draft',
-    current_idx: -1,
     questions: questions,
     time_limit: parseInt(document.getElementById('time-limit').value) || 15,
-    question_started_at: 0,
     updated_at: new Date().toISOString()
   });
   if (error) {
-    console.error(error);
-    setCloudStatus('⚠ クラウド保存に失敗 (通信を確認してください)', '#c62828');
+    console.error('クラウド保存エラー:', error);
+    if (error.code === '42P01' || String(error.message || '').includes('quiz_draft')) {
+      setCloudStatus('⚠ 共有用テーブル未作成 → setup-draft.sql をSupabaseで実行してください', '#c62828');
+    } else {
+      setCloudStatus('⚠ クラウド保存に失敗: ' + (error.message || '不明なエラー'), '#c62828');
+    }
   } else {
     setCloudStatus('☁ 全端末に共有済み');
   }
@@ -507,8 +509,14 @@ async function saveDraftToCloud() {
 
 async function loadDraftFromCloud() {
   if (!sbReady) { setCloudStatus('⚠ Supabase未設定 (この端末のみ保存)', '#e65100'); return false; }
-  const { data, error } = await sb.from('quiz_state').select('questions, time_limit').eq('id', DRAFT_ROW_ID).maybeSingle();
-  if (error) { console.error(error); return false; }
+  const { data, error } = await sb.from('quiz_draft').select('questions, time_limit').eq('id', DRAFT_ROW_ID).maybeSingle();
+  if (error) {
+    console.error('クラウド読込エラー:', error);
+    if (error.code === '42P01' || String(error.message || '').includes('quiz_draft')) {
+      setCloudStatus('⚠ 共有用テーブル未作成 → setup-draft.sql をSupabaseで実行してください', '#c62828');
+    }
+    return false;
+  }
   if (data && Array.isArray(data.questions) && data.questions.length > 0) {
     questions = data.questions;
     if (data.time_limit) document.getElementById('time-limit').value = data.time_limit;

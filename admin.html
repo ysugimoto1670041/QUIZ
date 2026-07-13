@@ -385,6 +385,30 @@ input:focus, textarea:focus { outline:none; border-color:var(--logo-pink); backg
   .preview-col { width:100%; position:static; }
   .phone-frame { max-width:320px; margin:0 auto; }
 }
+
+.big-q-card { text-align: center; }
+.bq-label { font-size: 13px; font-weight: 900; color: #999; letter-spacing: 0.1em; }
+.big-q {
+  font-family: 'Fredoka', 'Zen Maru Gothic';
+  font-size: 68px;
+  font-weight: 700;
+  color: var(--logo-pink);
+  line-height: 1.15;
+}
+.live-grid.three { grid-template-columns: 1fr 1fr 1fr; }
+.status-pill.big { font-size: 14px; padding: 7px 18px; }
+.fastest-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  background: var(--cream);
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 14px;
+  animation: rankSlide 0.4s cubic-bezier(0.34,1.56,0.64,1) backwards;
+}
+.fastest-row .fpos { min-width: 28px; color: var(--logo-pink); font-family: 'Fredoka'; }
+.fastest-row .fname { flex: 1; }
+.fastest-row .ftime { font-family: 'Fredoka'; color: #666; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -393,6 +417,7 @@ input:focus, textarea:focus { outline:none; border-color:var(--logo-pink); backg
   <div class="ttl">LTCB59同期会クイズ</div>
   <a class="nav-link" href="index.html">🏠 トップ</a>
   <a class="nav-link" href="play.html" target="_blank">🎮 参加者画面</a>
+  <a class="nav-link" href="projector.html" target="_blank">📽 プロジェクター</a>
 </div>
 
 <div class="container">
@@ -434,12 +459,8 @@ input:focus, textarea:focus { outline:none; border-color:var(--logo-pink); backg
     </div>
 
     <div class="card">
-      <h2>クイズを開始する</h2>
-      <p style="font-size:13px; color:#666; margin-bottom:12px;">参加者がQRコードから参加した状態で「クイズ開始」を押すと、全員の画面で同時にクイズが始まります。</p>
-      <div class="btn-row">
-        <button class="btn gold" onclick="startQuiz()">▶ クイズ開始</button>
-        <button class="btn secondary" onclick="resetQuiz()">参加者をリセット</button>
-      </div>
+      <h2>次のステップ</h2>
+      <p style="font-size:13px; color:#666;">問題ができたら <strong>「🎮 ライブ管理」タブ</strong> へ。クイズの開始から結果発表まで、本番の進行はすべてライブ管理で行います。</p>
     </div>
   </div>
 
@@ -474,36 +495,50 @@ input:focus, textarea:focus { outline:none; border-color:var(--logo-pink); backg
     <div class="live-layout">
       <div class="live-main">
         <div class="card">
-          <h2>クイズ進行 <span id="live-status" class="status-pill"><span class="dot"></span>待機中</span></h2>
-          <div class="live-grid">
+          <h2>クイズ操作</h2>
+          <div class="btn-row">
+            <button class="btn gold" onclick="startQuiz()">▶ クイズ開始(問題を配信)</button>
+            <button class="btn secondary" onclick="resetQuiz()">参加者をリセット</button>
+          </div>
+        </div>
+
+        <div class="card big-q-card">
+          <div class="bq-label">現在の問題</div>
+          <div class="big-q" id="big-q">－</div>
+          <div style="margin-top:8px;"><span id="live-status" class="status-pill big"><span class="dot"></span>開始前</span></div>
+        </div>
+
+        <div class="card">
+          <div class="live-grid three">
             <div class="live-stat">
               <div class="num" id="stat-players">0</div>
               <div class="lbl">参加者</div>
-            </div>
-            <div class="live-stat">
-              <div class="num" id="stat-current">-</div>
-              <div class="lbl">現在の問題</div>
             </div>
             <div class="live-stat">
               <div class="num" id="stat-answered">0</div>
               <div class="lbl">回答済み</div>
             </div>
             <div class="live-stat">
-              <div class="num" id="stat-state">-</div>
-              <div class="lbl">状態</div>
+              <div class="num" id="stat-correct">0</div>
+              <div class="lbl">正解者</div>
             </div>
           </div>
           <div style="margin-top:14px;">
             <button class="btn big-next" id="btn-next" onclick="nextStep()">▶ 次へ</button>
           </div>
           <div class="btn-row" style="margin-top:10px;">
-            <button class="btn gold" id="btn-ranking" onclick="toggleRanking()">🏆 ランキング発表</button>
-            <button class="btn secondary" onclick="endQuiz()">クイズ終了</button>
+            <button class="btn gold" id="btn-ranking" onclick="toggleRanking()">🏆 ランキング発表 (TOP20)</button>
+            <button class="btn secondary" onclick="endQuiz()">🏁 クイズ終了 → 最終成績発表!</button>
           </div>
         </div>
 
         <div class="card">
-          <h2>現在のランキング</h2>
+          <h2>⚡ この問題の正解スピード TOP10</h2>
+          <div id="fastest-list" class="ranking-list"></div>
+        </div>
+
+        <div class="card">
+          <h2>累計ランキング</h2>
           <div id="live-ranking" class="ranking-list"></div>
         </div>
       </div>

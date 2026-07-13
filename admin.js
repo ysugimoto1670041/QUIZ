@@ -251,7 +251,7 @@ async function upsertQuiz(patch) {
 window.startQuiz = async function() {
   if (!sbReady) { alert('Supabaseの設定がされていません。README.mdを確認してください。'); return; }
   const qCount = Math.min(parseInt(document.getElementById('q-count').value), questions.length);
-  if (qCount < 1) { alert('問題を1つ以上追加してください'); return; }
+  if (qCount < 1) { alert('問題を1つ以上追加してください(「📝 問題設定」タブ)'); return; }
   if (parseInt(document.getElementById('q-count').value) > questions.length) {
     if (!confirm(`出題数が問題数(${questions.length})より多いです。${questions.length}問で開始しますか?`)) return;
   }
@@ -269,8 +269,7 @@ window.startQuiz = async function() {
     question_started_at: 0
   });
 
-  document.querySelector('[data-tab="live"]').click();
-  alert('クイズを開始しました!参加者が揃ったら「次へ」ボタンで第1問を出題します。');
+  alert('クイズを開始しました!参加者が揃ったら「▶ 第1問を開始」を押してください。');
 }
 
 window.resetQuiz = async function() {
@@ -282,7 +281,7 @@ window.resetQuiz = async function() {
 }
 
 window.endQuiz = async function() {
-  if (!confirm('クイズを終了して結果発表に進みますか?')) return;
+  if (!confirm('クイズを終了して「最終成績発表」を開始します。\n全参加者の画面で盛大な発表演出が始まります。よろしいですか?')) return;
   await upsertQuiz({ state: 'finished' });
 }
 
@@ -295,13 +294,12 @@ window.toggleRanking = async function() {
   if (!quiz) { alert('クイズが開始されていません'); return; }
 
   if (quiz.state === 'ranking') {
-    // 元の状態に戻す
     const prev = rankingPrevState || ((quiz.current_idx >= 0) ? 'answer' : 'waiting');
     rankingPrevState = null;
     await upsertQuiz({ state: prev });
   } else {
     if (quiz.state === 'question') {
-      alert('出題中はランキングを表示できません。解答発表の後に押してください。');
+      alert('回答受付中はランキングを表示できません。解答発表の後に押してください。');
       return;
     }
     rankingPrevState = quiz.state;
@@ -312,7 +310,7 @@ window.toggleRanking = async function() {
 // ========== ライブ進行 ==========
 window.nextStep = async function() {
   const quiz = await getQuiz();
-  if (!quiz) { alert('クイズが開始されていません'); return; }
+  if (!quiz) { alert('クイズが開始されていません。「▶ クイズ開始」を押してください。'); return; }
 
   const state = quiz.state;
   const idx = quiz.current_idx;
@@ -333,6 +331,7 @@ window.nextStep = async function() {
     await upsertQuiz({ state: 'answer' });
   } else if (state === 'answer') {
     if (idx + 1 >= total) {
+      if (!confirm('最後の問題です。「最終成績発表」を開始しますか?')) return;
       await upsertQuiz({ state: 'finished' });
     } else {
       await upsertQuiz({
@@ -342,7 +341,7 @@ window.nextStep = async function() {
       });
     }
   } else if (state === 'finished') {
-    alert('クイズは既に終了しています。新しいクイズを始めるには「クイズ開始」を押してください。');
+    alert('クイズは終了しています。新しいクイズを始めるには「▶ クイズ開始」を押してください。');
   }
 }
 
@@ -362,30 +361,45 @@ function startLiveWatch() {
     .subscribe();
 }
 
+// 進行状態のわかりやすい表現
+const STATE_LABELS = {
+  waiting: '⏳ 開始前(参加受付中)',
+  question: '🎯 出題中(回答受付中)',
+  answer: '✨ 解答発表中',
+  ranking: '🏆 ランキング表示中',
+  finished: '🏁 クイズ終了(成績発表)'
+};
+
 async function refreshLive() {
   const quiz = await getQuiz();
   currentLiveQuiz = quiz;
   if (!quiz) return;
 
-  const stateMap = { waiting: '⏳ 待機', question: '🎯 出題中', answer: '✨ 解答発表', ranking: '🏆 ランキング', finished: '🏁 終了' };
-  document.getElementById('stat-state').textContent = stateMap[quiz.state] || '-';
-  document.getElementById('stat-current').textContent = quiz.current_idx >= 0 ? (quiz.current_idx + 1) + '/' + (quiz.questions || []).length : '-';
+  // 大型の問題番号表示
+  const bigQ = document.getElementById('big-q');
+  if (quiz.current_idx >= 0 && quiz.state !== 'finished') {
+    bigQ.textContent = `第${quiz.current_idx + 1}問 / 全${(quiz.questions || []).length}問`;
+  } else if (quiz.state === 'finished') {
+    bigQ.textContent = '🏁 終了';
+  } else {
+    bigQ.textContent = '開始前';
+  }
 
   const status = document.getElementById('live-status');
   status.classList.toggle('live', quiz.state === 'question');
-  status.innerHTML = '<span class="dot"></span>' + (stateMap[quiz.state] || '');
+  status.innerHTML = '<span class="dot"></span>' + (STATE_LABELS[quiz.state] || '-');
 
   const btn = document.getElementById('btn-next');
   if (quiz.state === 'waiting') btn.textContent = '▶ 第1問を開始';
   else if (quiz.state === 'question') btn.textContent = '✨ 解答を発表';
   else if (quiz.state === 'answer') {
-    btn.textContent = (quiz.current_idx + 1 >= (quiz.questions || []).length) ? '🏁 結果発表' : '▶ 次の問題へ';
+    btn.textContent = (quiz.current_idx + 1 >= (quiz.questions || []).length) ? '🏁 最終成績発表へ' : '▶ 次の問題へ';
   } else if (quiz.state === 'ranking') btn.textContent = '🏆 ランキング表示中';
-  else btn.textContent = '✓ 終了';
+  else btn.textContent = '✓ 終了しました';
 
   const rankBtn = document.getElementById('btn-ranking');
   if (rankBtn) {
-    rankBtn.textContent = (quiz.state === 'ranking') ? '✖ ランキングを閉じる' : '🏆 ランキング発表';
+    rankBtn.textContent = (quiz.state === 'ranking') ? '✖ ランキングを閉じる' : '🏆 ランキング発表 (TOP20)';
   }
 
   refreshAnswers();
@@ -407,13 +421,37 @@ async function refreshPlayers() {
 async function refreshAnswers() {
   if (!currentLiveQuiz) return;
   const idx = currentLiveQuiz.current_idx;
+  const fastEl = document.getElementById('fastest-list');
   if (idx < 0) {
     document.getElementById('stat-answered').textContent = 0;
+    document.getElementById('stat-correct').textContent = 0;
+    fastEl.innerHTML = '<div style="text-align:center; padding:16px; color:#999; font-size:13px;">出題が始まるとここに表示されます</div>';
     return;
   }
-  const { data, error } = await sb.from('answers').select('id').eq('q_idx', idx);
+
+  const { data, error } = await sb.from('answers').select('*').eq('q_idx', idx);
   if (error) { console.error(error); return; }
-  document.getElementById('stat-answered').textContent = (data || []).length;
+  const ans = data || [];
+  document.getElementById('stat-answered').textContent = ans.length;
+
+  // 正解者数と正解スピードTOP10
+  const question = (currentLiveQuiz.questions || [])[idx];
+  if (!question) return;
+  const correct = question.correct;
+  const correctAns = ans.filter(a => a.choice === correct).sort((a, b) => a.elapsed_ms - b.elapsed_ms);
+  document.getElementById('stat-correct').textContent = correctAns.length;
+
+  if (correctAns.length === 0) {
+    fastEl.innerHTML = '<div style="text-align:center; padding:16px; color:#999; font-size:13px;">まだ正解者がいません</div>';
+  } else {
+    fastEl.innerHTML = correctAns.slice(0, 10).map((a, i) => `
+      <div class="fastest-row" style="animation-delay:${i * 0.04}s">
+        <span class="fpos">${i + 1}</span>
+        <span class="fname">${escapeHtml(a.name || '?')}</span>
+        <span class="ftime">${(a.elapsed_ms / 1000).toFixed(2)}秒</span>
+      </div>
+    `).join('');
+  }
 }
 
 function renderRanking(players) {

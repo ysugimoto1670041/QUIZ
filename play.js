@@ -1,12 +1,8 @@
 // ========== モード判定 ==========
-// ?preview=1 : プレビューモード(DB読み取りのみの観戦、管理画面のライブプレビュー用)
-// ?test=1    : テストモード(DB不使用。作成中の問題をローカルで再生し、
-//              レイアウト・テキスト・動きを素早く確認できる)
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
 const TEST = _params.has('test');
 
-// カウントダウン演出の長さ(全員共通のオフセット)
 const COUNTDOWN_MS = 3000;
 
 // ========== Supabase初期化 ==========
@@ -36,12 +32,12 @@ let myId = localStorage.getItem('ltcb_player_id') || ('p_' + Math.random().toStr
 localStorage.setItem('ltcb_player_id', myId);
 let myName = '';
 let currentQuiz = null;
-let currentIdx = -1;
 let lastState = null;
 let timerInterval = null;
 let countdownInterval = null;
 let mySelected = -1;
-const revealedRounds = new Set(); // 二重加点・演出の重複防止
+let finaleRunning = false;
+const revealedRounds = new Set();
 
 // テストモード用
 let testChoice = -1;
@@ -85,6 +81,22 @@ function playFanfareCorrect() {
   }, 500);
 }
 
+function playGrandFanfare() {
+  // 最終発表用の長いファンファーレ
+  const seq = [
+    [392, 0.18], [392, 0.18], [392, 0.18], [523, 0.5],
+    [659, 0.18], [659, 0.18], [784, 0.6]
+  ];
+  let t = 0;
+  seq.forEach(([f, d]) => {
+    setTimeout(() => playTone(f, d + 0.1, 'triangle', 0.16), t * 1000);
+    t += d;
+  });
+  setTimeout(() => {
+    [523, 659, 784, 1047].forEach(f => playTone(f, 0.9, 'triangle', 0.1));
+  }, (t + 0.15) * 1000);
+}
+
 function playWrong() {
   playTone(220, 0.3, 'sawtooth', 0.1);
   setTimeout(() => playTone(180, 0.4, 'sawtooth', 0.1), 200);
@@ -98,6 +110,35 @@ function playCountBeep(final) {
 }
 function playStart() {
   [400, 600, 800].forEach((f, i) => setTimeout(() => playTone(f, 0.15, 'square', 0.1), i * 100));
+}
+function playDrum(i) { playTone(180 + (i % 3) * 30, 0.07, 'square', 0.06); }
+
+// ========== 80'sレトロ待受: 放射線バースト生成 ==========
+function buildBursts() {
+  document.querySelectorAll('[data-burst]').forEach(el => {
+    if (el.dataset.built) return;
+    el.dataset.built = '1';
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 1000 1000');
+    svg.style.width = '100%';
+    svg.style.height = '100%';
+    for (let i = 0; i < 70; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r1 = 110 + Math.random() * 130;
+      const r2 = r1 + 120 + Math.random() * 260;
+      const l = document.createElementNS(NS, 'line');
+      l.setAttribute('x1', (500 + Math.cos(a) * r1).toFixed(1));
+      l.setAttribute('y1', (500 + Math.sin(a) * r1).toFixed(1));
+      l.setAttribute('x2', (500 + Math.cos(a) * r2).toFixed(1));
+      l.setAttribute('y2', (500 + Math.sin(a) * r2).toFixed(1));
+      l.setAttribute('stroke', 'rgba(255,110,175,0.6)');
+      l.setAttribute('stroke-width', (1.5 + Math.random() * 2).toFixed(1));
+      l.setAttribute('stroke-linecap', 'round');
+      svg.appendChild(l);
+    }
+    el.appendChild(svg);
+  });
 }
 
 // ========== エントリー ==========
@@ -143,6 +184,12 @@ function showScreen(name) {
   document.body.classList.toggle('in-question', name === 'question');
 }
 
+function removeFinale() {
+  const f = document.getElementById('finale-overlay');
+  if (f) f.remove();
+  finaleRunning = false;
+}
+
 // ========== クイズ監視 ==========
 async function fetchQuiz() {
   const { data, error } = await sb.from('quiz_state').select('*').eq('id', QUIZ_ROW_ID).maybeSingle();
@@ -172,11 +219,12 @@ function handleStateChange(q) {
   const idx = q.current_idx;
   const stateKey = state + ':' + idx;
 
+  if (state !== 'finished') removeFinale();
+
   if (state === 'waiting') {
     showScreen('waiting');
   } else if (state === 'question') {
     if (lastState !== stateKey) {
-      currentIdx = idx;
       mySelected = -1;
       showQuestion(q);
     } else {
@@ -331,7 +379,6 @@ async function submitAnswer(i) {
   const elapsedMs = (i < 0) ? limit : Math.max(0, Date.now() - startedAt);
 
   if (TEST) {
-    // テストモード: DBに書かずローカル記録のみ
     testChoice = i;
     testElapsed = elapsedMs;
     setTimeout(() => {
@@ -379,7 +426,6 @@ async function revealAnswer(q) {
 
   if (PREVIEW) return;
 
-  // 二重発表(ランキング表示から戻った場合など)の防止
   if (revealedRounds.has(idx)) return;
   revealedRounds.add(idx);
 
@@ -439,7 +485,7 @@ function showRevealOverlay(correct, points) {
   }, 2200);
 }
 
-// ========== 途中ランキング表示 (TOP20を下位から順に発表) ==========
+// ========== 途中ランキング表示 (TOP20を下位から発表) ==========
 async function showRankingScreen() {
   clearInterval(timerInterval); timerInterval = null;
 
@@ -458,7 +504,6 @@ async function showRankingScreen() {
   if (n === 0) {
     el.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">まだ参加者がいません</div>';
   } else {
-    // 下位から順にポップアップ表示 (20位が最初、1位が最後に登場)
     el.innerHTML = arr.map((p, i) => {
       const isMe = !PREVIEW && !TEST && p.id === myId;
       const isTop5 = i < 5;
@@ -525,6 +570,111 @@ function fireConfetti() {
   loop();
 }
 
+// ========== 最終成績発表 (段階演出) ==========
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
+async function runFinale(arr) {
+  if (finaleRunning) return;
+  finaleRunning = true;
+
+  const ov = document.createElement('div');
+  ov.id = 'finale-overlay';
+  ov.innerHTML = '<div class="finale-stage" id="finale-stage"></div>';
+  document.body.appendChild(ov);
+  const stage = ov.querySelector('#finale-stage');
+  const n = arr.length;
+
+  if (n === 0) {
+    ov.remove();
+    finaleRunning = false;
+    renderResultScreen(arr);
+    return;
+  }
+
+  // === 第1幕: タイトル + ファンファーレ ===
+  stage.innerHTML = '<div class="finale-title">🎺 最終成績発表!</div>';
+  playGrandFanfare();
+  fireConfetti();
+  await wait(3200);
+  if (!finaleRunning) return;
+
+  // === 第2幕: 20位〜4位を下から順に ===
+  const startIdx = Math.min(19, n - 1);
+  if (startIdx >= 3) {
+    stage.innerHTML = '<div class="finale-sub">🏆 TOP 20</div><div class="finale-list" id="finale-list"></div>';
+    const listWrap = stage.querySelector('#finale-list');
+    for (let i = startIdx; i >= 3; i--) {
+      if (!finaleRunning) return;
+      const p = arr[i];
+      if (!p) continue;
+      const row = document.createElement('div');
+      row.className = 'finale-row';
+      row.innerHTML = `<span class="fr-pos">${i + 1}位</span><span class="fr-name">${escapeHtml(p.name)}</span><span class="fr-score">${p.score}</span>`;
+      listWrap.prepend(row);
+      playDrum(i);
+      await wait(750);
+    }
+    await wait(800);
+  }
+
+  // === 第3幕: 3位 (5秒間を置く) ===
+  if (arr[2] && finaleRunning) {
+    bigReveal(stage, 3, arr[2], '🥉');
+    await wait(5000);
+  }
+  // === 第4幕: 2位 (10秒間を置く) ===
+  if (arr[1] && finaleRunning) {
+    bigReveal(stage, 2, arr[1], '🥈');
+    await wait(10000);
+  }
+  // === 第5幕: 1位 くす玉 + Congratulations ===
+  if (arr[0] && finaleRunning) {
+    champion(stage, arr[0]);
+    await wait(9000);
+  }
+
+  if (!finaleRunning) return;
+  ov.style.transition = 'opacity 0.8s';
+  ov.style.opacity = '0';
+  await wait(800);
+  ov.remove();
+  finaleRunning = false;
+  renderResultScreen(arr);
+}
+
+function bigReveal(stage, rank, p, medal) {
+  stage.innerHTML = `
+    <div class="finale-bigcard blink">
+      <div class="fb-medal">${medal}</div>
+      <div class="fb-rank">第${rank}位</div>
+      <div class="fb-name">${escapeHtml(p.name)}</div>
+      <div class="fb-score">${p.score} pts</div>
+    </div>`;
+  playFanfareCorrect();
+  fireConfetti();
+}
+
+function champion(stage, p) {
+  stage.innerHTML = `
+    <div class="kusudama">
+      <div class="ku-half left"></div><div class="ku-half right"></div>
+      <div class="ku-ribbons">${'<span class="ribbon"></span>'.repeat(10)}</div>
+      <div class="ku-banner">🎊 Congratulations!! 🎊</div>
+    </div>
+    <div class="champ">
+      <div class="champ-crown">👑</div>
+      <div class="champ-rank">優 勝</div>
+      <div class="champ-name">${escapeHtml(p.name)}</div>
+      <div class="champ-score">${p.score} pts</div>
+    </div>`;
+  playGrandFanfare();
+  setTimeout(playFanfareCorrect, 1600);
+  fireConfetti();
+  setTimeout(fireConfetti, 900);
+  setTimeout(fireConfetti, 2000);
+  setTimeout(fireConfetti, 3400);
+}
+
 // ========== 結果画面 ==========
 function renderResultScreen(arr) {
   const podium = document.getElementById('podium');
@@ -567,15 +717,7 @@ async function showResult() {
   if (error) console.error(error);
   const arr = (data || []).map(p => ({ id: p.id, name: p.name, score: p.score || 0 }));
 
-  renderResultScreen(arr);
-
-  if (!PREVIEW) {
-    const myRank = arr.findIndex(p => p.id === myId);
-    if (myRank >= 0 && myRank < 5) {
-      setTimeout(fireConfetti, 500);
-      setTimeout(playFanfareCorrect, 800);
-    }
-  }
+  runFinale(arr);
 }
 
 // ========== テストモード ==========
@@ -625,11 +767,10 @@ function setupTestMode() {
   currentQuiz = loadTestQuiz();
   myName = 'テスト';
   document.getElementById('screen-entry').classList.add('hidden');
-  document.getElementById('waiting-name').textContent = '🧪 テストモード(この画面の操作は本番に影響しません)';
+  document.getElementById('waiting-name').textContent = '🧪 テストモード(本番には影響しません)';
   document.getElementById('player-name').textContent = '🧪 テスト';
   showScreen('waiting');
 
-  // 操作バー
   const bar = document.createElement('div');
   bar.id = 'test-bar';
   bar.innerHTML = `
@@ -657,7 +798,6 @@ window.testNext = function() {
     testReset();
     return;
   } else if (q.state === 'ranking') {
-    // ランキングから戻る: 直前の状態に応じて再開
     q.state = (q.current_idx >= 0) ? 'answer' : 'waiting';
     handleTestState();
     return;
@@ -679,11 +819,18 @@ function handleTestState() {
     btn.textContent = '✨ 解答';
   } else if (q.state === 'answer') {
     revealAnswerTest(q);
-    btn.textContent = (q.current_idx + 1 >= q.questions.length) ? '🏁 結果' : '▶ 次へ';
+    btn.textContent = (q.current_idx + 1 >= q.questions.length) ? '🏁 結果発表' : '▶ 次へ';
   } else if (q.state === 'finished') {
-    showResultTest();
+    runFinale(dummyPlayersWithMe());
     btn.textContent = '↺ 最初から';
   }
+}
+
+function dummyPlayersWithMe() {
+  const arr = dummyPlayers(21);
+  arr.splice(2, 0, { id: myId, name: 'あなた(テスト)', score: arr[2].score + 1 });
+  arr.sort((a, b) => b.score - a.score);
+  return arr;
 }
 
 function revealAnswerTest(q) {
@@ -710,21 +857,10 @@ function revealAnswerTest(q) {
   if (myCorrect) {
     const limit = (q.time_limit || 15) * 1000;
     const speedBonus = Math.max(0, Math.round(100 * (1 - (testElapsed / limit))));
-    const rarityBonus = Math.round(150 / 3); // 正解者3人と仮定
+    const rarityBonus = Math.round(150 / 3);
     points = 100 + speedBonus + rarityBonus;
   }
   showRevealOverlay(myCorrect, points);
-}
-
-function showResultTest() {
-  clearInterval(timerInterval); timerInterval = null;
-  const arr = dummyPlayers(21);
-  arr.splice(2, 0, { id: myId, name: 'あなた(テスト)', score: arr[2].score + 1 });
-  arr.sort((a, b) => b.score - a.score);
-  // renderResultScreen内の isMe 判定は PREVIEW=false なので myId が効く
-  renderResultScreen(arr);
-  setTimeout(fireConfetti, 500);
-  setTimeout(playFanfareCorrect, 800);
 }
 
 window.testRanking = function() {
@@ -740,6 +876,7 @@ window.testReset = function() {
   clearInterval(countdownInterval); countdownInterval = null;
   const cdOverlay = document.getElementById('countdown-overlay');
   if (cdOverlay) cdOverlay.remove();
+  removeFinale();
   revealedRounds.clear();
   currentQuiz = loadTestQuiz();
   mySelected = -1;
@@ -751,8 +888,9 @@ window.testReset = function() {
 
 // ========== 起動 ==========
 document.addEventListener('DOMContentLoaded', () => {
+  buildBursts();
+
   if (TEST) {
-    // テストモードはSupabase不要 (設定前でも動作する)
     document.getElementById('config-warn').classList.add('hidden');
     setupTestMode();
     return;

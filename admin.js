@@ -1,5 +1,5 @@
-// 同期会クイズ v5 (2026-07-13) - admin.js
-console.log('同期会クイズ v5 (2026-07-13) - admin.js loaded');
+// 同期会クイズ v1.7 (2026-07-13) - admin.js
+console.log('同期会クイズ v1.7 (2026-07-13) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -395,7 +395,7 @@ async function refreshLive() {
   if (quiz.state === 'waiting') btn.textContent = '▶ 第1問を開始';
   else if (quiz.state === 'question') btn.textContent = '✨ 解答を発表';
   else if (quiz.state === 'answer') {
-    btn.textContent = (quiz.current_idx + 1 >= (quiz.questions || []).length) ? '🏁 最終成績発表へ' : '▶ 次の問題へ';
+    btn.textContent = (quiz.current_idx + 1 >= (quiz.questions || []).length) ? '🏁 最終成績発表へ' : '▶ 次の質問へ';
   } else if (quiz.state === 'ranking') btn.textContent = '🏆 ランキング表示中';
   else btn.textContent = '✓ 終了しました';
 

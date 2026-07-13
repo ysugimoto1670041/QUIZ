@@ -1,3 +1,5 @@
+// 同期会クイズ v5 (2026-07-13) - projector.js
+console.log('同期会クイズ v5 (2026-07-13) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 3000;

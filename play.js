@@ -1,3 +1,5 @@
+// 同期会クイズ v5 (2026-07-13) - play.js
+console.log('同期会クイズ v5 (2026-07-13) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');

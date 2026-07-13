@@ -1,5 +1,5 @@
-// 同期会クイズ v1.7 (2026-07-13) - admin.js
-console.log('同期会クイズ v1.7 (2026-07-13) - admin.js loaded');
+// 同期会クイズ v1.8 (2026-07-13) - admin.js
+console.log('同期会クイズ v1.8 (2026-07-13) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -271,6 +271,11 @@ window.startQuiz = async function() {
     question_started_at: 0
   });
 
+  // 経過時間タイマーを開始
+  localStorage.setItem('ltcb_quiz_started_at', String(Date.now()));
+  localStorage.removeItem('ltcb_quiz_finished_at');
+  updateElapsed();
+
   alert('クイズを開始しました!参加者が揃ったら「▶ 第1問を開始」を押してください。');
 }
 
@@ -399,6 +404,13 @@ async function refreshLive() {
   } else if (quiz.state === 'ranking') btn.textContent = '🏆 ランキング表示中';
   else btn.textContent = '✓ 終了しました';
 
+  // 終了時に経過時間を固定
+  if (quiz.state === 'finished') {
+    if (!localStorage.getItem('ltcb_quiz_finished_at')) {
+      localStorage.setItem('ltcb_quiz_finished_at', String(Date.now()));
+    }
+  }
+
   const rankBtn = document.getElementById('btn-ranking');
   if (rankBtn) {
     rankBtn.textContent = (quiz.state === 'ranking') ? '✖ ランキングを閉じる' : '🏆 現在のランキング発表 (TOP20)';
@@ -436,6 +448,27 @@ async function refreshAnswers() {
   if (!question) return;
   const correctAns = ans.filter(a => a.choice === question.correct);
   document.getElementById('stat-correct').textContent = correctAns.length;
+}
+
+// ========== 経過時間 (クイズ開始からの 分:秒) ==========
+let elapsedTimer = null;
+
+function updateElapsed() {
+  const el = document.getElementById('quiz-elapsed');
+  if (!el) return;
+  const t0 = parseInt(localStorage.getItem('ltcb_quiz_started_at') || '0');
+  if (!t0) { el.textContent = '00:00'; return; }
+  const tEnd = parseInt(localStorage.getItem('ltcb_quiz_finished_at') || '0') || Date.now();
+  const sec = Math.max(0, Math.floor((tEnd - t0) / 1000));
+  const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+  const ss = String(sec % 60).padStart(2, '0');
+  el.textContent = mm + ':' + ss;
+}
+
+function startElapsedTicker() {
+  if (elapsedTimer) return;
+  updateElapsed();
+  elapsedTimer = setInterval(updateElapsed, 1000);
 }
 
 // ========== プレビュー/テスト切替 ==========
@@ -477,4 +510,5 @@ document.addEventListener('DOMContentLoaded', () => {
   loadLocal();
   renderQuestionList();
   setupPreviewTabs();
+  startElapsedTicker();
 });

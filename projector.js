@@ -1,6 +1,8 @@
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 3000;
+// ?embed=1 : 管理画面内のプレビュー用 (無音・自動接続・全画面化なし)
+const EMBED = new URLSearchParams(location.search).has('embed');
 
 let sb = null;
 let quiz = null;
@@ -19,6 +21,7 @@ function getAudioCtx() {
   return audioCtx;
 }
 function playTone(freq, duration, type = 'sine', volume = 0.2) {
+  if (EMBED) return; // 埋め込みプレビューは無音
   const ctx = getAudioCtx();
   if (!ctx) return;
   const osc = ctx.createOscillator();
@@ -169,6 +172,18 @@ function showQuestionP(q) {
     img.classList.add('hidden');
   }
 
+  // 最終問題はダブルスコアを強調
+  const oldD = document.getElementById('p-double');
+  if (oldD) oldD.remove();
+  if (idx === q.questions.length - 1) {
+    const d = document.createElement('div');
+    d.id = 'p-double';
+    d.className = 'p-double';
+    d.textContent = '🔥 最終問題!ダブルスコアチャンス!!';
+    const pq = document.getElementById('p-question');
+    pq.insertBefore(d, pq.querySelector('.pq-card'));
+  }
+
   const labels = ['A', 'B', 'C', 'D'];
   document.getElementById('p-choices').innerHTML = question.choices.map((c, i) => `
     <div class="p-choice">
@@ -225,17 +240,23 @@ function startTimerP(q) {
   const startedAt = effectiveStart(q);
   const fill = document.getElementById('p-timer-fill');
   fill.classList.remove('warn');
-  let lastTickSec = -1;
+  let lastUrge = 0;
 
   timerInt = setInterval(() => {
     const remaining = Math.max(0, limit - (Date.now() - startedAt));
-    fill.style.width = Math.min(100, (remaining / limit) * 100) + '%';
+    const frac = remaining / limit;
+    fill.style.width = Math.min(100, frac * 100) + '%';
     const sec = Math.ceil(remaining / 1000);
-    if (sec <= 5 && sec > 0 && sec !== lastTickSec) {
-      lastTickSec = sec;
-      playTick();
-      fill.classList.add('warn');
+    // だんだん速く・高くなる焦らせチクタク音
+    if (remaining > 0) {
+      const gap = Math.max(150, 850 * frac + 130);
+      const now = Date.now();
+      if (now - lastUrge >= gap) {
+        lastUrge = now;
+        playTone(500 + (1 - frac) * 480, 0.05, 'square', frac < 0.3 ? 0.1 : 0.06);
+      }
     }
+    if (sec <= 5) fill.classList.add('warn');
     if (remaining <= 0) { clearInterval(timerInt); timerInt = null; }
   }, 100);
 }
@@ -450,6 +471,13 @@ function renderQR() {
 document.addEventListener('DOMContentLoaded', () => {
   buildBursts();
   renderQR();
+
+  if (EMBED) {
+    // 管理画面内プレビュー: クリック不要で即接続 (無音)
+    document.getElementById('start-overlay').remove();
+    connect();
+    return;
+  }
 
   document.getElementById('start-overlay').addEventListener('click', async () => {
     document.getElementById('start-overlay').remove();

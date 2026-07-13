@@ -274,6 +274,19 @@ function showQuestion(q) {
   `).join('');
 
   document.getElementById('answered-status').classList.add('hidden');
+
+  // 最終問題はダブルスコアを強調表示
+  const oldBanner = document.getElementById('double-banner');
+  if (oldBanner) oldBanner.remove();
+  if (idx === q.questions.length - 1) {
+    const b = document.createElement('div');
+    b.id = 'double-banner';
+    b.className = 'double-banner';
+    b.textContent = '🔥 最終問題!ダブルスコアチャンス!!';
+    const qs = document.getElementById('screen-question');
+    qs.insertBefore(b, qs.firstChild);
+  }
+
   showScreen('question');
 
   const effStart = effectiveStart(q);
@@ -332,20 +345,26 @@ function startTimer(q) {
   const fillEl = document.getElementById('timer-fill');
   const textEl = document.getElementById('timer-text');
   fillEl.classList.remove('warn');
-  let lastTickSec = -1;
+  let lastUrge = 0;
 
   timerInterval = setInterval(() => {
     const elapsed = Date.now() - startedAt;
     const remaining = Math.max(0, limit - elapsed);
-    const pct = Math.min(100, (remaining / limit) * 100);
-    fillEl.style.width = pct + '%';
+    const frac = remaining / limit;
+    fillEl.style.width = Math.min(100, frac * 100) + '%';
     const sec = Math.ceil(remaining / 1000);
     textEl.textContent = sec + '秒';
-    if (sec <= 5 && sec > 0 && sec !== lastTickSec) {
-      lastTickSec = sec;
-      playTick();
-      fillEl.classList.add('warn');
+    // だんだん速く・高くなる「焦らせ」チクタク音 (回答時間中ずっと)
+    if (remaining > 0 && elapsed >= 0) {
+      const gap = Math.max(150, 850 * frac + 130); // 間隔がどんどん短く
+      const now = Date.now();
+      if (now - lastUrge >= gap) {
+        lastUrge = now;
+        const freq = 500 + (1 - frac) * 480;       // 音程がどんどん高く
+        playTone(freq, 0.05, 'square', frac < 0.3 ? 0.09 : 0.05);
+      }
     }
+    if (sec <= 5) fillEl.classList.add('warn');
     if (remaining <= 0) {
       clearInterval(timerInterval);
       timerInterval = null;
@@ -413,6 +432,7 @@ async function revealAnswer(q) {
   const question = q.questions[idx];
   if (!question) return;
   const correct = question.correct;
+  const isLast = idx === q.questions.length - 1;
 
   showScreen('question');
   const choicesEl = document.getElementById('choices');
@@ -443,9 +463,10 @@ async function revealAnswer(q) {
     const correctCount = allCorrect.length;
     const rarityBonus = Math.round(150 / Math.max(correctCount, 1));
     myPointsThisRound = 100 + speedBonus + rarityBonus;
+    if (isLast) myPointsThisRound *= 2; // 最終問題はダブルスコア
   }
 
-  showRevealOverlay(myCorrect, myPointsThisRound);
+  showRevealOverlay(myCorrect, myPointsThisRound, isLast && myCorrect);
 
   if (myCorrect && myPointsThisRound > 0) {
     const { data: currentPlayer } = await sb.from('players').select('score').eq('id', myId).maybeSingle();
@@ -454,7 +475,7 @@ async function revealAnswer(q) {
   }
 }
 
-function showRevealOverlay(correct, points) {
+function showRevealOverlay(correct, points, isDouble) {
   const existing = document.getElementById('reveal-overlay');
   if (existing) existing.remove();
   const overlay = document.createElement('div');
@@ -467,6 +488,7 @@ function showRevealOverlay(correct, points) {
         ${correct ? 'せいかい!' : 'ざんねん'}
       </div>
       ${correct ? `<div class="reveal-points">+${points} pts</div>` : ''}
+      ${isDouble ? '<div class="double-badge">🔥 ダブルスコア獲得!!</div>' : ''}
     </div>
   `;
   document.body.appendChild(overlay);
@@ -841,6 +863,7 @@ function revealAnswerTest(q) {
 
   const question = q.questions[q.current_idx];
   const correct = question.correct;
+  const isLast = q.current_idx === q.questions.length - 1;
 
   showScreen('question');
   const choicesEl = document.getElementById('choices');
@@ -859,8 +882,9 @@ function revealAnswerTest(q) {
     const speedBonus = Math.max(0, Math.round(100 * (1 - (testElapsed / limit))));
     const rarityBonus = Math.round(150 / 3);
     points = 100 + speedBonus + rarityBonus;
+    if (isLast) points *= 2;
   }
-  showRevealOverlay(myCorrect, points);
+  showRevealOverlay(myCorrect, points, isLast && myCorrect);
 }
 
 window.testRanking = function() {

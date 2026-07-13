@@ -1,5 +1,5 @@
-// 同期会クイズ v1.8 (2026-07-13) - admin.js
-console.log('同期会クイズ v1.8 (2026-07-13) - admin.js loaded');
+// 同期会クイズ v1.9 (2026-07-13) - admin.js
+console.log('同期会クイズ v1.9 (2026-07-13) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -40,8 +40,20 @@ document.querySelectorAll('.tab').forEach(t => {
 });
 
 // ========== 問題リスト表示 ==========
+const MAX_QUESTIONS = 10;
+
 function renderQuestionList() {
   const list = document.getElementById('q-list');
+  const full = questions.length >= MAX_QUESTIONS;
+
+  // 追加ボタンの制御
+  const addBtn = document.getElementById('btn-add-q');
+  if (addBtn) {
+    addBtn.disabled = full;
+    addBtn.style.opacity = full ? '0.5' : '1';
+    addBtn.textContent = full ? '✅ 10問 設定済み' : '+ 問題を追加';
+  }
+
   if (questions.length === 0) {
     list.innerHTML = '<div style="text-align:center; padding:24px; color:#999; font-size:13px;">まだ問題がありません<br>「+ 問題を追加」から作成してください</div>';
     return;
@@ -55,7 +67,7 @@ function renderQuestionList() {
         <button class="icon-btn" onclick="deleteQuestion(${i})" title="削除">🗑️</button>
       </div>
     </div>
-  `).join('');
+  `).join('') + (full ? '<div class="q-complete">🎉 問題の設定は全て完了です(10問)</div>' : '');
 }
 
 function escapeHtml(s) {
@@ -64,6 +76,10 @@ function escapeHtml(s) {
 
 // ========== 問題編集モーダル ==========
 window.openQuestionEditor = function(index) {
+  if (typeof index !== 'number' && questions.length >= MAX_QUESTIONS) {
+    alert('問題は最大10問までです。既存の問題を編集するか、削除してから追加してください。');
+    return;
+  }
   editingIndex = (typeof index === 'number') ? index : -1;
   const q = (editingIndex >= 0) ? questions[editingIndex] : { text: '', image: null, choices: [{text:'',image:null},{text:'',image:null},{text:'',image:null},{text:'',image:null}], correct: 0 };
 
@@ -171,6 +187,7 @@ window.saveQuestion = function() {
   else questions.push(q);
 
   saveLocal();
+  scheduleDraftSave();
   renderQuestionList();
   closeQuestionEditor();
 }
@@ -179,6 +196,7 @@ window.deleteQuestion = function(i) {
   if (!confirm('この問題を削除しますか?')) return;
   questions.splice(i, 1);
   saveLocal();
+  scheduleDraftSave();
   renderQuestionList();
 }
 
@@ -232,8 +250,8 @@ function loadLocal() {
   } catch (e) { console.warn(e); }
 }
 
-document.getElementById('time-limit').addEventListener('change', saveLocal);
-document.getElementById('q-count').addEventListener('change', saveLocal);
+document.getElementById('time-limit').addEventListener('change', () => { saveLocal(); scheduleDraftSave(); });
+document.getElementById('q-count').addEventListener('change', () => { saveLocal(); scheduleDraftSave(); });
 
 // ========== Supabase ヘルパ ==========
 const QUIZ_ROW_ID = 1;
@@ -450,6 +468,57 @@ async function refreshAnswers() {
   document.getElementById('stat-correct').textContent = correctAns.length;
 }
 
+// ========== 問題リストのクラウド共有 ==========
+// quiz_state テーブルの id=2 を「下書き保存」専用の行として使用する。
+// これによりどの端末 (PC・スマホ) からも同じ最新の問題リストが表示される。
+const DRAFT_ROW_ID = 2;
+let draftSaveTimer = null;
+
+function setCloudStatus(text, color) {
+  const el = document.getElementById('cloud-status');
+  if (el) { el.textContent = text; el.style.color = color || '#4caf50'; }
+}
+
+function scheduleDraftSave() {
+  if (!sbReady) { setCloudStatus('⚠ Supabase未設定 (この端末のみ保存)', '#e65100'); return; }
+  setCloudStatus('☁ 保存中...', '#999');
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(saveDraftToCloud, 800);
+}
+
+async function saveDraftToCloud() {
+  if (!sbReady) return;
+  const { error } = await sb.from('quiz_state').upsert({
+    id: DRAFT_ROW_ID,
+    state: 'draft',
+    current_idx: -1,
+    questions: questions,
+    time_limit: parseInt(document.getElementById('time-limit').value) || 15,
+    question_started_at: 0,
+    updated_at: new Date().toISOString()
+  });
+  if (error) {
+    console.error(error);
+    setCloudStatus('⚠ クラウド保存に失敗 (通信を確認してください)', '#c62828');
+  } else {
+    setCloudStatus('☁ 全端末に共有済み');
+  }
+}
+
+async function loadDraftFromCloud() {
+  if (!sbReady) { setCloudStatus('⚠ Supabase未設定 (この端末のみ保存)', '#e65100'); return false; }
+  const { data, error } = await sb.from('quiz_state').select('questions, time_limit').eq('id', DRAFT_ROW_ID).maybeSingle();
+  if (error) { console.error(error); return false; }
+  if (data && Array.isArray(data.questions) && data.questions.length > 0) {
+    questions = data.questions;
+    if (data.time_limit) document.getElementById('time-limit').value = data.time_limit;
+    saveLocal(); // この端末にもキャッシュ
+    setCloudStatus('☁ 全端末に共有済み');
+    return true;
+  }
+  return false;
+}
+
 // ========== 経過時間 (クイズ開始からの 分:秒) ==========
 let elapsedTimer = null;
 
@@ -511,4 +580,14 @@ document.addEventListener('DOMContentLoaded', () => {
   renderQuestionList();
   setupPreviewTabs();
   startElapsedTicker();
+
+  // クラウドに保存された問題リストを読込 (どの端末でも最新を表示)
+  loadDraftFromCloud().then((loaded) => {
+    if (loaded) {
+      renderQuestionList();
+    } else if (questions.length > 0) {
+      // クラウドが空でこの端末に問題がある場合はアップロードして共有
+      scheduleDraftSave();
+    }
+  });
 });

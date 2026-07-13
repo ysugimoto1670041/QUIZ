@@ -1,5 +1,5 @@
-// 同期会クイズ v1.8 (2026-07-13) - play.js
-console.log('同期会クイズ v1.8 (2026-07-13) - play.js loaded');
+// 同期会クイズ v1.9 (2026-07-13) - play.js
+console.log('同期会クイズ v1.9 (2026-07-13) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -789,6 +789,18 @@ function setupTestMode() {
   if (badge) badge.textContent = '🧪 テスト';
 
   currentQuiz = loadTestQuiz();
+  // クラウドに共有された問題リストがあれば全端末共通で使用
+  try {
+    if (typeof SUPABASE_URL !== 'undefined' && SUPABASE_URL && !SUPABASE_URL.includes('YOUR_')) {
+      const tsb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      tsb.from('quiz_state').select('questions, time_limit').eq('id', 2).maybeSingle().then(({ data }) => {
+        if (data && Array.isArray(data.questions) && data.questions.length > 0 && currentQuiz.state === 'waiting') {
+          currentQuiz.questions = data.questions;
+          if (data.time_limit) currentQuiz.time_limit = data.time_limit;
+        }
+      });
+    }
+  } catch (e) { console.warn(e); }
   myName = 'テスト';
   document.getElementById('screen-entry').classList.add('hidden');
   document.getElementById('waiting-name').textContent = '🧪 テストモード(本番には影響しません)';

@@ -1,5 +1,5 @@
-// 同期会クイズ v2.0 (2026-07-14) - play.js
-console.log('同期会クイズ v2.0 (2026-07-14) - play.js loaded');
+// 同期会クイズ v2.1 (2026-07-14) - play.js
+console.log('同期会クイズ v2.1 (2026-07-14) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -264,6 +264,14 @@ async function startWatchQuiz() {
       handleStateChange(q);
     })
     .subscribe();
+
+  // リアルタイム通知が届かない環境向けの保険 (2.5秒ごとに状態を再取得)
+  if (!startWatchQuiz._poll) {
+    startWatchQuiz._poll = setInterval(async () => {
+      const q = await fetchQuiz();
+      if (q) { currentQuiz = q; handleStateChange(q); }
+    }, 2500);
+  }
 }
 
 function handleStateChange(q) {

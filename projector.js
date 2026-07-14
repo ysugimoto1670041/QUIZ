@@ -1,5 +1,5 @@
-// 同期会クイズ v2.0 (2026-07-14) - projector.js
-console.log('同期会クイズ v2.0 (2026-07-14) - projector.js loaded');
+// 同期会クイズ v2.1 (2026-07-14) - projector.js
+console.log('同期会クイズ v2.1 (2026-07-14) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 3000;
@@ -161,6 +161,13 @@ async function connect() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => refreshCount())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'answers' }, () => refreshAnswered())
     .subscribe();
+
+  // リアルタイム通知が届かない環境向けの保険 (2.5秒ごとに状態を再取得)
+  setInterval(async () => {
+    const { data } = await sb.from('quiz_state').select('*').eq('id', QUIZ_ROW_ID).maybeSingle();
+    if (data) { quiz = data; handleState(data); }
+    refreshCount();
+  }, 2500);
 }
 
 async function refreshCount() {

@@ -1,5 +1,5 @@
-// 同期会クイズ v2.0 (2026-07-14) - admin.js
-console.log('同期会クイズ v2.0 (2026-07-14) - admin.js loaded');
+// 同期会クイズ v2.1 (2026-07-14) - admin.js
+console.log('同期会クイズ v2.1 (2026-07-14) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -346,6 +346,7 @@ window.toggleRanking = async function() {
     rankingPrevState = quiz.state;
     await upsertQuiz({ state: 'ranking' });
   }
+  setTimeout(refreshLive, 300);
 }
 
 // ========== ライブ進行 ==========
@@ -363,6 +364,10 @@ window.nextStep = async function() {
   }
 
   if (state === 'waiting') {
+    if (!(quiz.questions || []).length) {
+      alert('問題が配信されていません。\nまず「▶ クイズ開始(問題を配信)」を押してから「第1問を開始」を押してください。');
+      return;
+    }
     await upsertQuiz({
       state: 'question',
       current_idx: 0,
@@ -384,6 +389,7 @@ window.nextStep = async function() {
   } else if (state === 'finished') {
     alert('クイズは終了しています。新しいクイズを始めるには「▶ クイズ開始」を押してください。');
   }
+  setTimeout(refreshLive, 300);
 }
 
 let liveWatchStarted = false;
@@ -394,6 +400,9 @@ function startLiveWatch() {
 
   refreshLive();
   refreshPlayers();
+
+  // リアルタイム通知が届かない環境向けの保険 (3秒ごとに再取得)
+  setInterval(() => { refreshLive(); refreshPlayers(); }, 3000);
 
   sb.channel('admin-watch')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_state' }, () => refreshLive())
@@ -406,7 +415,7 @@ function startLiveWatch() {
 const STATE_LABELS = {
   waiting: '⏳ 開始前(参加受付中)',
   question: '🎯 出題中(回答受付中)',
-  answer: '✨ 解答発表中',
+  answer: '✨ 正解発表中',
   ranking: '🏆 ランキング表示中',
   finished: '🏁 クイズ終了(成績発表)'
 };
@@ -419,7 +428,7 @@ async function refreshLive() {
   // 大型の問題番号表示
   const bigQ = document.getElementById('big-q');
   if (quiz.current_idx >= 0 && quiz.state !== 'finished') {
-    bigQ.textContent = `第${quiz.current_idx + 1}問 / 全${(quiz.questions || []).length}問`;
+    bigQ.textContent = `第${quiz.current_idx + 1}問`;
   } else if (quiz.state === 'finished') {
     bigQ.textContent = '🏁 終了';
   } else {
@@ -432,7 +441,7 @@ async function refreshLive() {
 
   const btn = document.getElementById('btn-next');
   if (quiz.state === 'waiting') btn.textContent = '▶ 第1問を開始';
-  else if (quiz.state === 'question') btn.textContent = '✨ 解答を発表';
+  else if (quiz.state === 'question') btn.textContent = '✨ 正解を発表';
   else if (quiz.state === 'answer') {
     btn.textContent = (quiz.current_idx + 1 >= (quiz.questions || []).length) ? '🏁 最終成績発表へ' : '▶ 次の質問へ';
   } else if (quiz.state === 'ranking') btn.textContent = '🏆 ランキング表示中';

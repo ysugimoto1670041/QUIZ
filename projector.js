@@ -1,5 +1,5 @@
-// 同期会クイズ v1.9.2 (2026-07-13) - projector.js
-console.log('同期会クイズ v1.9.2 (2026-07-13) - projector.js loaded');
+// 同期会クイズ v2.0 (2026-07-14) - projector.js
+console.log('同期会クイズ v2.0 (2026-07-14) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 3000;
@@ -26,6 +26,7 @@ function playTone(freq, duration, type = 'sine', volume = 0.2) {
   if (EMBED) return; // 埋め込みプレビューは無音
   const ctx = getAudioCtx();
   if (!ctx) return;
+  if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) {} }
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = type;
@@ -49,6 +50,47 @@ function playGrandFanfare() {
 function playTick() { playTone(800, 0.05, 'square', 0.05); }
 function playCountBeep(final) { playTone(final ? 880 : 440, final ? 0.4 : 0.15, 'square', final ? 0.14 : 0.1); }
 function playDrum(i) { playTone(180 + (i % 3) * 30, 0.07, 'square', 0.06); }
+
+function playUrgeTick(frac) {
+  const base = 400 + (1 - frac) * 520;
+  playTone(base, 0.06, 'square', 0.06 + (1 - frac) * 0.08);
+  if (frac < 0.4) {
+    setTimeout(() => playTone(base * 1.5, 0.05, 'square', 0.1), 75);
+  }
+}
+
+// ========== 投票数ライブ表示 (残り10秒〜) ==========
+let pVotesShown = false;
+let pLastVoteFetch = 0;
+
+function showVoteBadgesP() {
+  document.querySelectorAll('#p-choices .p-choice').forEach((el, i) => {
+    if (!el.querySelector('.p-vote')) {
+      const b = document.createElement('div');
+      b.className = 'p-vote';
+      b.dataset.vc = i;
+      b.textContent = '0票';
+      el.appendChild(b);
+    }
+  });
+}
+
+async function refreshVoteCountsP() {
+  if (!quiz || quiz.current_idx < 0) return;
+  const counts = [0, 0, 0, 0];
+  const { data } = await sb.from('answers').select('choice').eq('q_idx', quiz.current_idx);
+  (data || []).forEach(a => { if (a.choice >= 0 && a.choice < 4) counts[a.choice]++; });
+  document.querySelectorAll('#p-choices .p-vote').forEach(el => {
+    const i = parseInt(el.dataset.vc);
+    const t = (counts[i] || 0) + '票';
+    if (el.textContent !== t) {
+      el.textContent = t;
+      el.classList.remove('bump');
+      void el.offsetWidth;
+      el.classList.add('bump');
+    }
+  });
+}
 function playStart() { [400, 600, 800].forEach((f, i) => setTimeout(() => playTone(f, 0.15, 'square', 0.1), i * 100)); }
 
 function escapeHtml(s) {
@@ -162,6 +204,8 @@ function showQuestionP(q) {
   const question = q.questions[idx];
   if (!question) return;
 
+  pVotesShown = false;
+  pLastVoteFetch = 0;
   document.getElementById('pq-num').textContent = `第${idx + 1}問 / 全${q.questions.length}問`;
   document.getElementById('pq-text').textContent = question.text || '';
   document.getElementById('pq-answered').textContent = '0';
@@ -174,6 +218,8 @@ function showQuestionP(q) {
     img.classList.add('hidden');
   }
 
+  const oldR2 = document.getElementById('p-rate');
+  if (oldR2) oldR2.remove();
   // 最終問題はダブルスコアを強調
   const oldD = document.getElementById('p-double');
   if (oldD) oldD.remove();
@@ -249,13 +295,24 @@ function startTimerP(q) {
     const frac = remaining / limit;
     fill.style.width = Math.min(100, frac * 100) + '%';
     const sec = Math.ceil(remaining / 1000);
-    // だんだん速く・高くなる焦らせチクタク音
+    // だんだん速く・強くなる「心臓ドキドキ」音
     if (remaining > 0) {
-      const gap = Math.max(150, 850 * frac + 130);
+      const gap = Math.max(300, 1000 * frac + 200);
       const now = Date.now();
       if (now - lastUrge >= gap) {
         lastUrge = now;
-        playTone(500 + (1 - frac) * 480, 0.05, 'square', frac < 0.3 ? 0.1 : 0.06);
+        playUrgeTick(frac);
+      }
+    }
+    // 残り10秒: 投票数を表示してライブ更新
+    if (remaining > 0 && remaining <= 10000 && quiz && quiz.state === 'question') {
+      if (!pVotesShown) {
+        pVotesShown = true;
+        showVoteBadgesP();
+        refreshVoteCountsP();
+      } else if (Date.now() - pLastVoteFetch > 1200) {
+        pLastVoteFetch = Date.now();
+        refreshVoteCountsP();
       }
     }
     if (sec <= 5) fill.classList.add('warn');
@@ -280,6 +337,24 @@ async function revealP(q) {
     if (i === correct) el.classList.add('correct-reveal');
     else el.classList.add('wrong-reveal');
   });
+
+  // 正答率バナーを表示
+  const { data } = await sb.from('answers').select('choice').eq('q_idx', q.current_idx);
+  const ans = data || [];
+  const cc = ans.filter(a => a.choice === correct).length;
+  const rate = ans.length > 0 ? Math.round(cc / ans.length * 100) : 0;
+  const oldR = document.getElementById('p-rate');
+  if (oldR) oldR.remove();
+  if (ans.length > 0) {
+    const r = document.createElement('div');
+    r.id = 'p-rate';
+    r.className = 'p-double';
+    r.style.background = 'linear-gradient(135deg, #42a5f5, #7e57c2)';
+    r.style.animation = 'none';
+    r.textContent = `📊 正答率 ${rate}% (${cc}/${ans.length}人)`;
+    const pq = document.getElementById('p-question');
+    pq.insertBefore(r, pq.querySelector('.pq-card'));
+  }
   playFanfare();
   fireConfetti();
 }
@@ -409,7 +484,7 @@ function championP(stage, p) {
 
 function renderResultP(arr) {
   const grid = document.getElementById('p-result-grid');
-  grid.innerHTML = arr.slice(0, 20).map((p, i) => {
+  grid.innerHTML = arr.slice(0, 10).map((p, i) => {
     const crown = ['👑','🥈','🥉','🏅','🏅'][i] || '';
     return `<div class="p-rank-row ${i < 5 ? 'top5' : ''}" style="animation-delay:${i * 0.05}s">
       <span class="rp">${crown || (i + 1) + '位'}</span>

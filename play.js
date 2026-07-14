@@ -1,5 +1,5 @@
-// 同期会クイズ v1.9.2 (2026-07-13) - play.js
-console.log('同期会クイズ v1.9.2 (2026-07-13) - play.js loaded');
+// 同期会クイズ v2.0 (2026-07-14) - play.js
+console.log('同期会クイズ v2.0 (2026-07-14) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -62,6 +62,7 @@ function getAudioCtx() {
 function playTone(freq, duration, type = 'sine', volume = 0.2) {
   const ctx = getAudioCtx();
   if (!ctx) return;
+  if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) {} }
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = type;
@@ -114,6 +115,55 @@ function playStart() {
   [400, 600, 800].forEach((f, i) => setTimeout(() => playTone(f, 0.15, 'square', 0.1), i * 100));
 }
 function playDrum(i) { playTone(180 + (i % 3) * 30, 0.07, 'square', 0.06); }
+
+// 残り時間が減るほど速く・高く・強くなる「心臓ドキドキ」音
+function playUrgeTick(frac) {
+  const base = 400 + (1 - frac) * 520;
+  playTone(base, 0.06, 'square', 0.05 + (1 - frac) * 0.07);
+  if (frac < 0.4) {
+    setTimeout(() => playTone(base * 1.5, 0.05, 'square', 0.09), 75); // 二連打
+  }
+}
+
+// ========== 投票数ライブ表示 (残り10秒〜) ==========
+let votesShown = false;
+let lastVoteFetch = 0;
+let testVotes = [0, 0, 0, 0];
+
+function showVoteBadges() {
+  document.querySelectorAll('#choices .choice').forEach((el, i) => {
+    if (!el.querySelector('.vote-count')) {
+      const b = document.createElement('div');
+      b.className = 'vote-count';
+      b.dataset.vc = i;
+      b.textContent = '0票';
+      el.appendChild(b);
+    }
+  });
+}
+
+async function refreshVoteCounts() {
+  if (!currentQuiz) return;
+  let counts = [0, 0, 0, 0];
+  if (TEST) {
+    // テストモード: 投票が増えていく様子を疑似再現
+    testVotes[Math.floor(Math.random() * 4)]++;
+    counts = testVotes.slice();
+  } else {
+    const { data } = await sb.from('answers').select('choice').eq('q_idx', currentQuiz.current_idx);
+    (data || []).forEach(a => { if (a.choice >= 0 && a.choice < 4) counts[a.choice]++; });
+  }
+  document.querySelectorAll('#choices .vote-count').forEach(el => {
+    const i = parseInt(el.dataset.vc);
+    const t = (counts[i] || 0) + '票';
+    if (el.textContent !== t) {
+      el.textContent = t;
+      el.classList.remove('bump');
+      void el.offsetWidth;
+      el.classList.add('bump');
+    }
+  });
+}
 
 // ========== 80'sレトロ待受: 放射線バースト生成 ==========
 function buildBursts() {
@@ -277,6 +327,11 @@ function showQuestion(q) {
 
   document.getElementById('answered-status').classList.add('hidden');
 
+  // 投票数表示の状態を初期化
+  votesShown = false;
+  lastVoteFetch = 0;
+  testVotes = [Math.floor(Math.random() * 2), Math.floor(Math.random() * 2), Math.floor(Math.random() * 2), Math.floor(Math.random() * 2)];
+
   // 最終問題はダブルスコアを強調表示
   const oldBanner = document.getElementById('double-banner');
   if (oldBanner) oldBanner.remove();
@@ -356,14 +411,24 @@ function startTimer(q) {
     fillEl.style.width = Math.min(100, frac * 100) + '%';
     const sec = Math.ceil(remaining / 1000);
     textEl.textContent = sec + '秒';
-    // だんだん速く・高くなる「焦らせ」チクタク音 (回答時間中ずっと)
+    // だんだん速く・強くなる「心臓ドキドキ」音 (回答時間中ずっと)
     if (remaining > 0 && elapsed >= 0) {
-      const gap = Math.max(150, 850 * frac + 130); // 間隔がどんどん短く
+      const gap = Math.max(300, 1000 * frac + 200); // 鼓動の間隔がどんどん短く
       const now = Date.now();
       if (now - lastUrge >= gap) {
         lastUrge = now;
-        const freq = 500 + (1 - frac) * 480;       // 音程がどんどん高く
-        playTone(freq, 0.05, 'square', frac < 0.3 ? 0.09 : 0.05);
+        playUrgeTick(frac);
+      }
+    }
+    // 残り10秒: 各選択肢の投票数を表示し、以降ライブでカウントアップ
+    if (remaining > 0 && remaining <= 10000 && currentQuiz && currentQuiz.state === 'question') {
+      if (!votesShown) {
+        votesShown = true;
+        showVoteBadges();
+        refreshVoteCounts();
+      } else if (Date.now() - lastVoteFetch > 1200) {
+        lastVoteFetch = Date.now();
+        refreshVoteCounts();
       }
     }
     if (sec <= 5) fillEl.classList.add('warn');
@@ -402,6 +467,7 @@ async function submitAnswer(i) {
   if (TEST) {
     testChoice = i;
     testElapsed = elapsedMs;
+    if (i >= 0) testVotes[i]++;
     setTimeout(() => {
       document.getElementById('answered-status').classList.remove('hidden');
     }, 800);
@@ -457,6 +523,11 @@ async function revealAnswer(q) {
   const allCorrect = ans.filter(a => a.choice === correct);
   const myAns = ans.find(a => a.player_id === myId);
   const myCorrect = myAns && myAns.choice === correct;
+  const rateStat = {
+    total: ans.length,
+    correctCount: allCorrect.length,
+    rate: ans.length > 0 ? Math.round(allCorrect.length / ans.length * 100) : 0
+  };
 
   let myPointsThisRound = 0;
   if (myCorrect) {
@@ -468,7 +539,7 @@ async function revealAnswer(q) {
     if (isLast) myPointsThisRound *= 2; // 最終問題はダブルスコア
   }
 
-  showRevealOverlay(myCorrect, myPointsThisRound, isLast && myCorrect);
+  showRevealOverlay(myCorrect, myPointsThisRound, isLast && myCorrect, rateStat);
 
   if (myCorrect && myPointsThisRound > 0) {
     const { data: currentPlayer } = await sb.from('players').select('score').eq('id', myId).maybeSingle();
@@ -477,7 +548,7 @@ async function revealAnswer(q) {
   }
 }
 
-function showRevealOverlay(correct, points, isDouble) {
+function showRevealOverlay(correct, points, isDouble, rateStat) {
   const existing = document.getElementById('reveal-overlay');
   if (existing) existing.remove();
   const overlay = document.createElement('div');
@@ -491,6 +562,7 @@ function showRevealOverlay(correct, points, isDouble) {
       </div>
       ${correct ? `<div class="reveal-points">+${points} pts</div>` : ''}
       ${isDouble ? '<div class="double-badge">🔥 ダブルスコア獲得!!</div>' : ''}
+      ${rateStat && rateStat.total > 0 ? `<div class="reveal-rate">📊 正答率 ${rateStat.rate}% (${rateStat.correctCount}/${rateStat.total}人)</div>` : ''}
     </div>
   `;
   document.body.appendChild(overlay);
@@ -720,7 +792,7 @@ function renderResultScreen(arr) {
   });
 
   const rankFull = document.getElementById('ranking-full');
-  rankFull.innerHTML = arr.map((p, i) => {
+  rankFull.innerHTML = arr.slice(0, 20).map((p, i) => {
     const isMe = !PREVIEW && p.id === myId;
     const isTop5 = i < 5;
     const crown = ['👑','🥈','🥉','🏅','🏅'][i] || '';
@@ -898,7 +970,12 @@ function revealAnswerTest(q) {
     points = 100 + speedBonus + rarityBonus;
     if (isLast) points *= 2;
   }
-  showRevealOverlay(myCorrect, points, isLast && myCorrect);
+  const tTotal = testVotes.reduce((a, b) => a + b, 0);
+  const tCorrect = testVotes[correct] || 0;
+  showRevealOverlay(myCorrect, points, isLast && myCorrect, {
+    total: tTotal, correctCount: tCorrect,
+    rate: tTotal > 0 ? Math.round(tCorrect / tTotal * 100) : 0
+  });
 }
 
 window.testRanking = function() {

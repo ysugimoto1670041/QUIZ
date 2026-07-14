@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 同期会クイズ v1.9.2 (2026-07-13) -->
+<!-- 同期会クイズ v2.0 (2026-07-14) -->
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -405,6 +405,33 @@ body {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.07); }
 }
+
+/* ④ 投票数ライブ表示 */
+.p-vote {
+  position: absolute; right: 1.2vw; top: 50%;
+  transform: translateY(-50%);
+  background: var(--deep); color: var(--gold);
+  font-family: 'Fredoka';
+  font-weight: 700; font-size: 2.6vh;
+  padding: 0.5vh 1.4vw;
+  border-radius: 999px;
+  z-index: 3;
+  animation: popIn 0.3s var(--spring);
+}
+.p-vote.bump { animation: pVotePop 0.3s var(--spring); }
+@keyframes pVotePop {
+  0%, 100% { transform: translateY(-50%) scale(1); }
+  50% { transform: translateY(-50%) scale(1.3); }
+}
+/* ⑧ 最終結果: 1〜10位を1列で大きく一覧表示 */
+#p-result-grid {
+  grid-auto-flow: row;
+  grid-template-columns: 1fr;
+  grid-template-rows: none;
+  width: 56vw;
+  margin: 0 auto;
+}
+#p-result-grid .p-rank-row { font-size: 3.3vh; padding: 0.7vh 2vw; }
 </style>
 </head>
 <body>

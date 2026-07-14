@@ -1,5 +1,5 @@
-// 同期会クイズ v1.9.2 (2026-07-13) - admin.js
-console.log('同期会クイズ v1.9.2 (2026-07-13) - admin.js loaded');
+// 同期会クイズ v2.0 (2026-07-14) - admin.js
+console.log('同期会クイズ v2.0 (2026-07-14) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -299,10 +299,26 @@ window.startQuiz = async function() {
 
 window.resetQuiz = async function() {
   if (!sbReady) return;
-  if (!confirm('参加者リストと回答をリセットします。よろしいですか?')) return;
+  if (!confirm('【オールリセット】\n参加者・回答・進行状況をすべて消去し、全画面(スマホ・プロジェクター)をスタート前に戻します。\n参加者はQRコードから参加し直しとなります。よろしいですか?')) return;
   await sb.from('answers').delete().neq('id', 0);
   await sb.from('players').delete().neq('id', '');
-  alert('リセットしました');
+  await upsertQuiz({ state: 'waiting', current_idx: -1, question_started_at: 0 });
+  localStorage.removeItem('ltcb_quiz_started_at');
+  localStorage.removeItem('ltcb_quiz_finished_at');
+  updateElapsed();
+  alert('オールリセットしました。参加者はQRコードから再参加できます。');
+}
+
+// スタート前へ戻る: 参加者はそのまま、全画面をスタート前(待受)に戻す
+window.backToStart = async function() {
+  if (!sbReady) return;
+  if (!confirm('【スタート前へ戻る】\n参加者はそのままで、スマホ・プロジェクターの画面をスタート前(待受)に戻します。\nスコアと回答はリセットされます。よろしいですか?')) return;
+  await sb.from('answers').delete().neq('id', 0);
+  await sb.from('players').update({ score: 0 }).neq('id', '');
+  await upsertQuiz({ state: 'waiting', current_idx: -1, question_started_at: 0 });
+  localStorage.removeItem('ltcb_quiz_started_at');
+  localStorage.removeItem('ltcb_quiz_finished_at');
+  updateElapsed();
 }
 
 window.endQuiz = async function() {
@@ -455,6 +471,7 @@ async function refreshAnswers() {
   if (idx < 0) {
     document.getElementById('stat-answered').textContent = 0;
     document.getElementById('stat-correct').textContent = 0;
+    document.getElementById('stat-rate').textContent = '—';
     return;
   }
   const { data, error } = await sb.from('answers').select('*').eq('q_idx', idx);
@@ -466,6 +483,8 @@ async function refreshAnswers() {
   if (!question) return;
   const correctAns = ans.filter(a => a.choice === question.correct);
   document.getElementById('stat-correct').textContent = correctAns.length;
+  document.getElementById('stat-rate').textContent =
+    ans.length > 0 ? Math.round(correctAns.length / ans.length * 100) + '%' : '—';
 }
 
 // ========== 問題リストのクラウド共有 ==========

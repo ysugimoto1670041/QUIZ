@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 同期会クイズ v1.9.2 (2026-07-13) -->
+<!-- 同期会クイズ v2.0 (2026-07-14) -->
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -738,6 +738,41 @@ body.in-question .roam-logo { display:none; }
 @keyframes marqueeMove {
   to { transform: translateX(-100%); }
 }
+
+/* ④ 残り10秒からの投票数ライブ表示 */
+.choice { position: relative; }
+.vote-count {
+  position: absolute; right: 8px; top: 50%;
+  transform: translateY(-50%);
+  background: var(--deep); color: var(--gold);
+  font-family: 'Fredoka', 'Zen Maru Gothic';
+  font-weight: 700; font-size: 13px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  z-index: 3;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.25);
+  animation: popIn 0.3s var(--spring);
+  pointer-events: none;
+}
+.vote-count.bump { animation: votePop 0.3s var(--spring); }
+@keyframes votePop {
+  0%, 100% { transform: translateY(-50%) scale(1); }
+  50% { transform: translateY(-50%) scale(1.3); }
+}
+/* ⑥ 「Q1/10」が縦書きにならないよう保護 */
+.q-counter { white-space: nowrap; flex: 0 0 auto; }
+/* ① 解答発表時の正答率表示 */
+.reveal-rate {
+  margin-top: 10px;
+  display: inline-block;
+  background: rgba(0,0,0,0.28);
+  color: white;
+  font-weight: 900; font-size: 14px;
+  padding: 6px 16px;
+  border-radius: 999px;
+}
+/* ⑧ 最終結果はスクロールで20位まで閲覧可能 */
+#screen-result { overflow-y: auto; padding-bottom: 60px; }
 </style>
 </head>
 <body>

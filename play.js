@@ -1,5 +1,5 @@
-// 同期会クイズ v2.1 (2026-07-14) - play.js
-console.log('同期会クイズ v2.1 (2026-07-14) - play.js loaded');
+// 同期会クイズ v2.2 (2026-07-14) - play.js
+console.log('同期会クイズ v2.2 (2026-07-14) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -236,6 +236,13 @@ function showScreen(name) {
   document.body.classList.toggle('in-question', name === 'question');
 }
 
+function toggleReadyGo(on) {
+  const rg = document.getElementById('ready-go');
+  const mq = document.getElementById('marquee-wrap');
+  if (rg) rg.classList.toggle('hidden', !on);
+  if (mq) mq.classList.toggle('hidden', on);
+}
+
 function removeFinale() {
   const f = document.getElementById('finale-overlay');
   if (f) f.remove();
@@ -282,6 +289,11 @@ function handleStateChange(q) {
   if (state !== 'finished') removeFinale();
 
   if (state === 'waiting') {
+    toggleReadyGo(false);
+    showScreen('waiting');
+  } else if (state === 'ready') {
+    if (lastState !== stateKey) playStart();
+    toggleReadyGo(true);
     showScreen('waiting');
   } else if (state === 'question') {
     if (lastState !== stateKey) {
@@ -476,9 +488,6 @@ async function submitAnswer(i) {
     testChoice = i;
     testElapsed = elapsedMs;
     if (i >= 0) testVotes[i]++;
-    setTimeout(() => {
-      document.getElementById('answered-status').classList.remove('hidden');
-    }, 800);
     return;
   }
 
@@ -491,10 +500,6 @@ async function submitAnswer(i) {
   }, { onConflict: 'q_idx,player_id' });
 
   if (error) console.error(error);
-
-  setTimeout(() => {
-    document.getElementById('answered-status').classList.remove('hidden');
-  }, 800);
 }
 
 // ========== 解答発表 ==========
@@ -531,10 +536,13 @@ async function revealAnswer(q) {
   const allCorrect = ans.filter(a => a.choice === correct);
   const myAns = ans.find(a => a.player_id === myId);
   const myCorrect = myAns && myAns.choice === correct;
+  // 正答率 = 正解者数 ÷ 参加者数 (無回答も「はずれ」扱い)
+  const { data: allPlayers } = await sb.from('players').select('id');
+  const pCount = (allPlayers || []).length;
   const rateStat = {
-    total: ans.length,
+    total: pCount,
     correctCount: allCorrect.length,
-    rate: ans.length > 0 ? Math.round(allCorrect.length / ans.length * 100) : 0
+    rate: pCount > 0 ? Math.round(allCorrect.length / pCount * 100) : 0
   };
 
   let myPointsThisRound = 0;
@@ -570,7 +578,7 @@ function showRevealOverlay(correct, points, isDouble, rateStat) {
       </div>
       ${correct ? `<div class="reveal-points">+${points} pts</div>` : ''}
       ${isDouble ? '<div class="double-badge">🔥 ダブルスコア獲得!!</div>' : ''}
-      ${rateStat && rateStat.total > 0 ? `<div class="reveal-rate">📊 正答率 ${rateStat.rate}% (${rateStat.correctCount}/${rateStat.total}人)</div>` : ''}
+      ${rateStat && rateStat.total > 0 ? `<div class="reveal-rate">📊 正答率 ${rateStat.rate}% (${rateStat.correctCount}/参加${rateStat.total}人)</div>` : ''}
     </div>
   `;
   document.body.appendChild(overlay);
@@ -978,7 +986,7 @@ function revealAnswerTest(q) {
     points = 100 + speedBonus + rarityBonus;
     if (isLast) points *= 2;
   }
-  const tTotal = testVotes.reduce((a, b) => a + b, 0);
+  const tTotal = testVotes.reduce((a, b) => a + b, 0) + 2; // 未回答2人と仮定
   const tCorrect = testVotes[correct] || 0;
   showRevealOverlay(myCorrect, points, isLast && myCorrect, {
     total: tTotal, correctCount: tCorrect,

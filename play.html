@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 同期会クイズ v2.1 (2026-07-14) -->
+<!-- 同期会クイズ v2.2 (2026-07-14) -->
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -788,7 +788,7 @@ body.in-question .roam-logo { display:none; }
   font-family: 'Fredoka', 'Zen Maru Gothic';
   font-style: italic; font-weight: 700;
   font-size: 1.55em; line-height: 1.05;
-  background: linear-gradient(135deg, #ff2d78 15%, #ff7a3d 50%, #7e4dff 95%);
+  background: linear-gradient(180deg, #ffe45c 0%, #ff9a3d 38%, #ff2d78 70%, #8a2be2 100%);
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent;
   filter: drop-shadow(0 5px 16px rgba(255,45,120,0.45));
@@ -797,15 +797,15 @@ body.in-question .roam-logo { display:none; }
 }
 .rt-main {
   font-weight: 900; line-height: 1.2;
-  color: #ff2d78;
-  text-shadow: 2px 2px 0 #ffffff, 5px 5px 0 #5a6cff;
+  color: #21c7b8;
+  text-shadow: 2px 2px 0 #fff7e0, 5px 5px 0 #ff2d78;
   letter-spacing: 0.06em;
 }
 .rt-bar {
   display: flex; align-items: center; gap: 10px;
   font-family: 'Fredoka';
   font-size: 0.3em; font-weight: 700;
-  color: #7e4dff;
+  color: #ff8a3d;
   letter-spacing: 0.45em;
   margin-top: 8px;
 }
@@ -856,6 +856,64 @@ body.in-question .roam-logo { display:none; }
   box-shadow: 0 10px 34px rgba(0,0,0,0.28);
 }
 body.preview .answered-status { bottom: 78px; } /* テストバーと重ならない位置 */
+
+/* ==== v2.2 ==== */
+
+/* ⑦ READY GO! 表示 */
+.ready-go {
+  position: relative; z-index: 2;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 6px;
+  font-weight: 900;
+  font-size: clamp(18px, 5.5vw, 30px);
+  color: var(--deep);
+  text-align: center;
+}
+.ready-go span {
+  font-family: 'Fredoka', 'Zen Maru Gothic';
+  font-size: 2em; line-height: 1.1;
+  background: linear-gradient(135deg, #ff2d78, #ff8a3d, #21c7b8);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 4px 14px rgba(255,45,120,0.4));
+  animation: readyPulse 0.9s ease-in-out infinite;
+}
+@keyframes readyPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+
+/* ① 投票数バッジは選択肢の右下隅 (枠にかかる位置 / 写真を隠さない) */
+.vote-count {
+  top: auto; left: auto;
+  bottom: -10px; right: -6px;
+  transform: none;
+}
+@keyframes votePop {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.3); }
+}
+
+/* ② 「回答しました」廃止 → 選択枠を強調 + 右上にチェックマーク */
+.answered-status { display: none !important; }
+.choice.selected {
+  transform: scale(1.05);
+  z-index: 2;
+}
+.choice.selected::after {
+  content: '✓';
+  position: absolute;
+  top: -10px; right: -8px;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: #2e7d32;
+  color: white;
+  font-size: 17px; font-weight: 900;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  z-index: 4;
+  animation: popIn 0.3s var(--spring);
+}
 </style>
 </head>
 <body>
@@ -900,9 +958,10 @@ body.preview .answered-status { bottom: 78px; } /* テストバーと重なら�
     <span class="rt-main">メモリーズクイズ</span>
     <span class="rt-bar">✦ QUIZ TIME ✦</span>
   </div>
-  <div class="marquee-wrap" style="position:relative; z-index:2;">
+  <div class="marquee-wrap" id="marquee-wrap" style="position:relative; z-index:2;">
     <div class="marquee waiting-text">✨ クイズの開始を待っています ✨ まもなくスタート! ✨</div>
   </div>
+  <div class="ready-go hidden" id="ready-go">クイズが始まります<span>READY GO!</span></div>
   <div class="you-name" id="waiting-name" style="position:relative; z-index:2;"></div>
 </div>
 

@@ -1,5 +1,5 @@
-// 同期会クイズ v2.1 (2026-07-14) - admin.js
-console.log('同期会クイズ v2.1 (2026-07-14) - admin.js loaded');
+// 同期会クイズ v2.2 (2026-07-14) - admin.js
+console.log('同期会クイズ v2.2 (2026-07-14) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -282,7 +282,7 @@ window.startQuiz = async function() {
   await sb.from('players').update({ score: 0 }).neq('id', '');
 
   await upsertQuiz({
-    state: 'waiting',
+    state: 'ready',
     current_idx: -1,
     questions: useQs,
     time_limit: timeLimit,
@@ -294,7 +294,7 @@ window.startQuiz = async function() {
   localStorage.removeItem('ltcb_quiz_finished_at');
   updateElapsed();
 
-  alert('クイズを開始しました!参加者が揃ったら「▶ 第1問を開始」を押してください。');
+  alert('問題を配信しました!\n参加者・プロジェクター画面が「READY GO!」に切り替わります。\n「▶ 第1問を開始」を押すと3・2・1のカウントダウンで第1問が始まります。');
 }
 
 window.resetQuiz = async function() {
@@ -335,7 +335,7 @@ window.toggleRanking = async function() {
   if (!quiz) { alert('クイズが開始されていません'); return; }
 
   if (quiz.state === 'ranking') {
-    const prev = rankingPrevState || ((quiz.current_idx >= 0) ? 'answer' : 'waiting');
+    const prev = rankingPrevState || ((quiz.current_idx >= 0) ? 'answer' : 'ready');
     rankingPrevState = null;
     await upsertQuiz({ state: prev });
   } else {
@@ -363,7 +363,7 @@ window.nextStep = async function() {
     return;
   }
 
-  if (state === 'waiting') {
+  if (state === 'waiting' || state === 'ready') {
     if (!(quiz.questions || []).length) {
       alert('問題が配信されていません。\nまず「▶ クイズ開始(問題を配信)」を押してから「第1問を開始」を押してください。');
       return;
@@ -394,6 +394,7 @@ window.nextStep = async function() {
 
 let liveWatchStarted = false;
 let currentLiveQuiz = null;
+let playersCount = 0;
 function startLiveWatch() {
   if (liveWatchStarted || !sbReady) return;
   liveWatchStarted = true;
@@ -414,6 +415,7 @@ function startLiveWatch() {
 // 進行状態のわかりやすい表現
 const STATE_LABELS = {
   waiting: '⏳ 開始前(参加受付中)',
+  ready: '🚀 READY GO!(第1問待ち)',
   question: '🎯 出題中(回答受付中)',
   answer: '✨ 正解発表中',
   ranking: '🏆 ランキング表示中',
@@ -431,6 +433,8 @@ async function refreshLive() {
     bigQ.textContent = `第${quiz.current_idx + 1}問`;
   } else if (quiz.state === 'finished') {
     bigQ.textContent = '🏁 終了';
+  } else if (quiz.state === 'ready') {
+    bigQ.textContent = '🚀 READY!';
   } else {
     bigQ.textContent = '開始前';
   }
@@ -440,7 +444,7 @@ async function refreshLive() {
   status.innerHTML = '<span class="dot"></span>' + (STATE_LABELS[quiz.state] || '-');
 
   const btn = document.getElementById('btn-next');
-  if (quiz.state === 'waiting') btn.textContent = '▶ 第1問を開始';
+  if (quiz.state === 'waiting' || quiz.state === 'ready') btn.textContent = '▶ 第1問を開始';
   else if (quiz.state === 'question') btn.textContent = '✨ 正解を発表';
   else if (quiz.state === 'answer') {
     btn.textContent = (quiz.current_idx + 1 >= (quiz.questions || []).length) ? '🏁 最終成績発表へ' : '▶ 次の質問へ';
@@ -460,14 +464,65 @@ async function refreshLive() {
   }
 
   refreshAnswers();
+  updateQuestionBoard(quiz);
+}
+
+// ========== ⑨ 問題別データボード (平均回答時間 / 平均得点) ==========
+async function updateQuestionBoard(quiz) {
+  const el = document.getElementById('q-board');
+  if (!el || !quiz) return;
+  const qs = quiz.questions || [];
+
+  let doneUpTo = -1;
+  if (quiz.state === 'finished') doneUpTo = qs.length - 1;
+  else if (quiz.current_idx >= 0) {
+    doneUpTo = (quiz.state === 'question') ? quiz.current_idx - 1 : quiz.current_idx;
+  }
+  if (doneUpTo < 0 || qs.length === 0 || playersCount === 0) {
+    el.innerHTML = '<div class="qb-empty">正解発表後に自動で追加されます</div>';
+    return;
+  }
+
+  const { data, error } = await sb.from('answers').select('q_idx, choice, elapsed_ms');
+  if (error) { console.error(error); return; }
+  const ans = data || [];
+  const limit = (quiz.time_limit || 15) * 1000;
+
+  let html = '';
+  for (let i = 0; i <= doneUpTo && i < qs.length; i++) {
+    const rows = ans.filter(a => a.q_idx === i);
+    // 平均回答時間: タップ時点の秒数、無回答者は制限時間としてカウント
+    const sumT = rows.reduce((s, a) => s + Math.min(a.elapsed_ms || limit, limit), 0)
+               + Math.max(0, playersCount - rows.length) * limit;
+    const avgT = sumT / playersCount / 1000;
+    // 平均得点 = その問題の総得点 ÷ 参加者数
+    const correct = qs[i] ? qs[i].correct : 0;
+    const cRows = rows.filter(a => a.choice === correct);
+    const cc = cRows.length;
+    let sumPts = 0;
+    cRows.forEach(a => {
+      const speed = Math.max(0, Math.round(100 * (1 - a.elapsed_ms / limit)));
+      let pts = 100 + speed + Math.round(150 / Math.max(cc, 1));
+      if (i === qs.length - 1) pts *= 2;
+      sumPts += pts;
+    });
+    const avgP = sumPts / playersCount;
+    html += `<div class="qb-row" style="animation-delay:${i * 0.05}s">
+      <span class="qb-q">第${i + 1}問</span>
+      <span class="qb-t">⏱ 平均 ${avgT.toFixed(1)}秒</span>
+      <span class="qb-p">🎯 平均 ${avgP.toFixed(0)}点</span>
+    </div>`;
+  }
+  el.innerHTML = html || '<div class="qb-empty">正解発表後に自動で追加されます</div>';
 }
 
 async function refreshPlayers() {
   const { data, error } = await sb.from('players').select('*').order('score', { ascending: false });
   if (error) { console.error(error); return; }
+  playersCount = (data || []).length;
   const stat = document.getElementById('stat-players');
   const prev = stat.textContent;
-  stat.textContent = (data || []).length;
+  stat.textContent = playersCount;
   if (prev !== stat.textContent) {
     stat.parentElement.classList.add('bump');
     setTimeout(() => stat.parentElement.classList.remove('bump'), 400);
@@ -478,7 +533,6 @@ async function refreshAnswers() {
   if (!currentLiveQuiz) return;
   const idx = currentLiveQuiz.current_idx;
   if (idx < 0) {
-    document.getElementById('stat-answered').textContent = 0;
     document.getElementById('stat-correct').textContent = 0;
     document.getElementById('stat-rate').textContent = '—';
     return;
@@ -486,14 +540,14 @@ async function refreshAnswers() {
   const { data, error } = await sb.from('answers').select('*').eq('q_idx', idx);
   if (error) { console.error(error); return; }
   const ans = data || [];
-  document.getElementById('stat-answered').textContent = ans.length;
 
   const question = (currentLiveQuiz.questions || [])[idx];
   if (!question) return;
   const correctAns = ans.filter(a => a.choice === question.correct);
   document.getElementById('stat-correct').textContent = correctAns.length;
+  // ④ 正答率 = 正解者数 ÷ 参加者数 (無回答も「はずれ」扱い)
   document.getElementById('stat-rate').textContent =
-    ans.length > 0 ? Math.round(correctAns.length / ans.length * 100) + '%' : '—';
+    playersCount > 0 ? Math.round(correctAns.length / playersCount * 100) + '%' : '—';
 }
 
 // ========== 問題リストのクラウド共有 ==========
@@ -578,19 +632,36 @@ function startElapsedTicker() {
 
 // ========== プレビュー/テスト切替 ==========
 function setupPreviewTabs() {
-  document.querySelectorAll('.pv-tab').forEach(b => {
+  // 参加者画面 (ライブ/テスト)
+  document.querySelectorAll('.preview-col .pv-tab').forEach(b => {
     b.addEventListener('click', () => {
-      document.querySelectorAll('.pv-tab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.preview-col .pv-tab').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
-      const frame = document.getElementById('preview-frame');
-      frame.src = 'play.html?' + (b.dataset.mode === 'test' ? 'test=1' : 'preview=1');
+      document.getElementById('preview-frame').src =
+        'play.html?' + (b.dataset.mode === 'test' ? 'test=1' : 'preview=1');
     });
   });
-  const reload = document.querySelector('.pv-reload');
+  const reload = document.querySelector('.preview-col .pv-reload');
   if (reload) {
     reload.addEventListener('click', () => {
-      const frame = document.getElementById('preview-frame');
-      frame.src = frame.src;
+      const f = document.getElementById('preview-frame');
+      f.src = f.src;
+    });
+  }
+  // ⑤ プロジェクター画面 (ライブ/テスト)
+  document.querySelectorAll('.proj-col .pj-tab').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.proj-col .pj-tab').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      document.getElementById('projector-frame').src =
+        'projector.html?embed=1' + (b.dataset.mode === 'test' ? '&test=1' : '');
+    });
+  });
+  const pjReload = document.querySelector('.proj-col .pj-reload');
+  if (pjReload) {
+    pjReload.addEventListener('click', () => {
+      const f = document.getElementById('projector-frame');
+      f.src = f.src;
     });
   }
 }

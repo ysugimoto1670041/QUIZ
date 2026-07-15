@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 同期会クイズ v2.1 (2026-07-14) -->
+<!-- 同期会クイズ v2.2 (2026-07-14) -->
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -446,7 +446,7 @@ body {
   font-family: 'Fredoka', 'Zen Maru Gothic';
   font-style: italic; font-weight: 700;
   font-size: 1.5em; line-height: 1.05;
-  background: linear-gradient(135deg, #ff2d78 15%, #ff7a3d 50%, #7e4dff 95%);
+  background: linear-gradient(180deg, #ffe45c 0%, #ff9a3d 38%, #ff2d78 70%, #8a2be2 100%);
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent;
   filter: drop-shadow(0 0.8vh 2.4vh rgba(255,45,120,0.45));
@@ -455,15 +455,15 @@ body {
 }
 .rt-main {
   font-weight: 900; line-height: 1.2;
-  color: #ff2d78;
-  text-shadow: 0.35vh 0.35vh 0 #ffffff, 0.85vh 0.85vh 0 #5a6cff;
+  color: #21c7b8;
+  text-shadow: 0.35vh 0.35vh 0 #fff7e0, 0.85vh 0.85vh 0 #ff2d78;
   letter-spacing: 0.06em;
 }
 .rt-bar {
   display: flex; align-items: center; gap: 1.5vh;
   font-family: 'Fredoka';
   font-size: 0.28em; font-weight: 700;
-  color: #7e4dff;
+  color: #ff8a3d;
   letter-spacing: 0.45em;
   margin-top: 1vh;
 }
@@ -473,6 +473,72 @@ body {
   background: linear-gradient(90deg, transparent, #ff2d78, #7e4dff);
 }
 .rt-bar::after { background: linear-gradient(90deg, #7e4dff, #ff2d78, transparent); }
+
+/* ==== v2.2 ==== */
+/* ⑦ READY GO! */
+.p-ready {
+  position: relative; z-index: 2;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 1.5vh;
+  font-weight: 900;
+  font-size: 5vh;
+  color: var(--deep);
+  text-align: center;
+}
+.p-ready span {
+  font-family: 'Fredoka', 'Zen Maru Gothic';
+  font-size: 2.2em; line-height: 1.1;
+  background: linear-gradient(135deg, #ff2d78, #ff8a3d, #21c7b8);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0.6vh 2vh rgba(255,45,120,0.4));
+  animation: readyPulseP 0.9s ease-in-out infinite;
+}
+@keyframes readyPulseP {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+/* ① 票バッジは選択肢の右下隅 */
+.p-vote {
+  top: auto; left: auto;
+  bottom: -1.4vh; right: -0.6vw;
+  transform: none;
+}
+@keyframes pVotePop {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.3); }
+}
+/* ⑤ テストモード操作バー */
+#p-test-bar {
+  position: fixed; bottom: 2vh; left: 50%;
+  transform: translateX(-50%);
+  z-index: 2200;
+  display: flex; gap: 1vw; align-items: center;
+  background: rgba(43,26,63,0.92);
+  padding: 1.2vh 1.5vw;
+  border-radius: 999px;
+  box-shadow: 0 1vh 3vh rgba(0,0,0,0.35);
+  white-space: nowrap;
+}
+#p-test-bar button {
+  font-family: inherit; font-weight: 900;
+  font-size: 2.2vh;
+  border: none; border-radius: 999px;
+  padding: 1.2vh 2vw;
+  cursor: pointer;
+  background: linear-gradient(135deg, var(--logo-red), var(--logo-pink));
+  color: white;
+  white-space: nowrap;
+}
+#p-test-bar button.ghost { background: rgba(255,255,255,0.18); }
+.p-test-badge {
+  position: fixed; top: 1.5vh; left: 1.5vw;
+  z-index: 2200;
+  background: #ff9800; color: white;
+  font-weight: 900; font-size: 1.8vh;
+  padding: 0.7vh 1.5vw;
+  border-radius: 999px;
+}
 </style>
 </head>
 <body>
@@ -502,7 +568,7 @@ body {
     <span class="rt-main">メモリーズクイズ</span>
     <span class="rt-bar">✦ QUIZ TIME ✦</span>
   </div>
-  <div class="join-row">
+  <div class="join-row" id="join-row">
     <div id="p-qr"></div>
     <div class="join-info">
       <div class="t1">📱 QRコードをスキャンして参加!</div>
@@ -510,6 +576,7 @@ body {
       <div class="join-count"><span id="p-count">0</span><small> 人が参加中</small></div>
     </div>
   </div>
+  <div class="p-ready hidden" id="p-ready">クイズが始まります<span>READY GO!</span></div>
 </div>
 
 <!-- 出題 -->

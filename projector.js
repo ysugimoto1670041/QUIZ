@@ -1,10 +1,13 @@
-// 同期会クイズ v2.1 (2026-07-14) - projector.js
-console.log('同期会クイズ v2.1 (2026-07-14) - projector.js loaded');
+// 同期会クイズ v2.2 (2026-07-14) - projector.js
+console.log('同期会クイズ v2.2 (2026-07-14) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 3000;
 // ?embed=1 : 管理画面内のプレビュー用 (無音・自動接続・全画面化なし)
 const EMBED = new URLSearchParams(location.search).has('embed');
+// ?test=1 : テストモード (DB進行と切り離してローカル再生。実機プロジェクターの映りを検証できる)
+const TESTP = new URLSearchParams(location.search).has('test');
+let tVotes = [0, 0, 0, 0];
 
 let sb = null;
 let quiz = null;
@@ -23,7 +26,7 @@ function getAudioCtx() {
   return audioCtx;
 }
 function playTone(freq, duration, type = 'sine', volume = 0.2) {
-  if (EMBED) return; // 埋め込みプレビューは無音
+  if (EMBED && !TESTP) return; // 埋め込みライブプレビューは無音 (テストは音の確認も可能)
   const ctx = getAudioCtx();
   if (!ctx) return;
   if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) {} }
@@ -77,9 +80,15 @@ function showVoteBadgesP() {
 
 async function refreshVoteCountsP() {
   if (!quiz || quiz.current_idx < 0) return;
-  const counts = [0, 0, 0, 0];
-  const { data } = await sb.from('answers').select('choice').eq('q_idx', quiz.current_idx);
-  (data || []).forEach(a => { if (a.choice >= 0 && a.choice < 4) counts[a.choice]++; });
+  let counts = [0, 0, 0, 0];
+  if (TESTP) {
+    tVotes[Math.floor(Math.random() * 4)]++;
+    counts = tVotes.slice();
+    document.getElementById('pq-answered').textContent = tVotes.reduce((a, b) => a + b, 0);
+  } else {
+    const { data } = await sb.from('answers').select('choice').eq('q_idx', quiz.current_idx);
+    (data || []).forEach(a => { if (a.choice >= 0 && a.choice < 4) counts[a.choice]++; });
+  }
   document.querySelectorAll('#p-choices .p-vote').forEach(el => {
     const i = parseInt(el.dataset.vc);
     const t = (counts[i] || 0) + '票';
@@ -188,6 +197,11 @@ function handleState(q) {
   if (q.state !== 'finished') removeFinale();
 
   if (q.state === 'waiting') {
+    toggleReadyP(false);
+    showP('waiting');
+  } else if (q.state === 'ready') {
+    if (lastKey !== key) playStart();
+    toggleReadyP(true);
     showP('waiting');
   } else if (q.state === 'question') {
     if (lastKey !== key) showQuestionP(q);
@@ -199,6 +213,13 @@ function handleState(q) {
     if (lastKey !== key) showFinishedP();
   }
   lastKey = key;
+}
+
+function toggleReadyP(on) {
+  const rg = document.getElementById('p-ready');
+  const jr = document.getElementById('join-row');
+  if (rg) rg.classList.toggle('hidden', !on);
+  if (jr) jr.classList.toggle('hidden', on);
 }
 
 function effectiveStart(q) {
@@ -345,20 +366,27 @@ async function revealP(q) {
     else el.classList.add('wrong-reveal');
   });
 
-  // 正答率バナーを表示
-  const { data } = await sb.from('answers').select('choice').eq('q_idx', q.current_idx);
-  const ans = data || [];
-  const cc = ans.filter(a => a.choice === correct).length;
-  const rate = ans.length > 0 ? Math.round(cc / ans.length * 100) : 0;
+  // 正答率バナー (正解者数 ÷ 参加者数)
+  let cc = 0, pCount = 0;
+  if (TESTP) {
+    cc = tVotes[correct] || 0;
+    pCount = tVotes.reduce((a, b) => a + b, 0) + 2; // 未回答2人と仮定
+  } else {
+    const { data } = await sb.from('answers').select('choice').eq('q_idx', q.current_idx);
+    cc = (data || []).filter(a => a.choice === correct).length;
+    const { data: pl } = await sb.from('players').select('id');
+    pCount = (pl || []).length;
+  }
+  const rate = pCount > 0 ? Math.round(cc / pCount * 100) : 0;
   const oldR = document.getElementById('p-rate');
   if (oldR) oldR.remove();
-  if (ans.length > 0) {
+  if (pCount > 0) {
     const r = document.createElement('div');
     r.id = 'p-rate';
     r.className = 'p-double';
     r.style.background = 'linear-gradient(135deg, #42a5f5, #7e57c2)';
     r.style.animation = 'none';
-    r.textContent = `📊 正答率 ${rate}% (${cc}/${ans.length}人)`;
+    r.textContent = `📊 正答率 ${rate}% (${cc}/参加${pCount}人)`;
     const pq = document.getElementById('p-question');
     pq.insertBefore(r, pq.querySelector('.pq-card'));
   }
@@ -367,9 +395,24 @@ async function revealP(q) {
 }
 
 // ========== 途中ランキング ==========
+const DUMMY_NAMES_P = ['さとう','すずき','たかはし','たなか','わたなべ','いとう','やまもと','なかむら','こばやし','かとう','よしだ','やまだ','ささき','やまぐち','まつもと','いのうえ','きむら','はやし','しみず','さいとう','もり','あべ'];
+function dummyPlayersP(n) {
+  const arr = [];
+  for (let i = 0; i < n; i++) {
+    arr.push({ id: 'd' + i, name: DUMMY_NAMES_P[i % DUMMY_NAMES_P.length], score: Math.round(Math.random() * 800 + 100) });
+  }
+  arr.sort((a, b) => b.score - a.score);
+  return arr;
+}
+
 async function showRankingP() {
-  const { data } = await sb.from('players').select('*').order('score', { ascending: false }).limit(20);
-  const arr = (data || []).slice(0, 20);
+  let arr;
+  if (TESTP) {
+    arr = dummyPlayersP(22).slice(0, 20);
+  } else {
+    const { data } = await sb.from('players').select('*').order('score', { ascending: false }).limit(20);
+    arr = (data || []).slice(0, 20);
+  }
   const grid = document.getElementById('p-rank-grid');
   const n = arr.length;
   grid.innerHTML = arr.map((p, i) => {
@@ -387,6 +430,10 @@ async function showRankingP() {
 
 // ========== 最終成績発表 ==========
 async function showFinishedP() {
+  if (TESTP) {
+    runFinale(dummyPlayersP(22));
+    return;
+  }
   const { data } = await sb.from('players').select('*').order('score', { ascending: false });
   const arr = (data || []).map(p => ({ id: p.id, name: p.name, score: p.score || 0 }));
   runFinale(arr);
@@ -543,6 +590,112 @@ function fireConfetti() {
   loop();
 }
 
+// ========== ⑤ テストモード (プロジェクター実機での映り検証用) ==========
+function sampleQuestionsP() {
+  return [
+    { text: 'テスト問題1: LTCBのコーポレートカラーに最も近い色は?', image: null,
+      choices: [{text:'赤'},{text:'青'},{text:'緑'},{text:'黄'}], correct: 0 },
+    { text: 'テスト問題2: このクイズアプリで正解すると鳴る音は?', image: null,
+      choices: [{text:'ファンファーレ'},{text:'ブザー'},{text:'ドラムロール'},{text:'無音'}], correct: 0 }
+  ];
+}
+
+async function setupTestP() {
+  quiz = { state: 'waiting', current_idx: -1, questions: sampleQuestionsP(), time_limit: 15, question_started_at: 0 };
+
+  // クラウドに共有された問題リストがあれば使用 (本番と同じ見た目で検証できる)
+  try {
+    if (typeof SUPABASE_URL !== 'undefined' && SUPABASE_URL && !SUPABASE_URL.includes('YOUR_')) {
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      const { data } = await sb.from('quiz_draft').select('questions, time_limit').eq('id', 1).maybeSingle();
+      if (data && Array.isArray(data.questions) && data.questions.length > 0) {
+        quiz.questions = data.questions;
+        if (data.time_limit) quiz.time_limit = data.time_limit;
+      }
+    }
+  } catch (e) { console.warn(e); }
+
+  // テストバッジと操作バー
+  const badge = document.createElement('div');
+  badge.className = 'p-test-badge';
+  badge.textContent = '🧪 テストモード';
+  document.body.appendChild(badge);
+
+  const bar = document.createElement('div');
+  bar.id = 'p-test-bar';
+  bar.innerHTML = `
+    <button id="p-test-next" onclick="pTestNext()">🚀 READY GO</button>
+    <button class="ghost" onclick="pTestRanking()">🏆</button>
+    <button class="ghost" onclick="pTestReset()">↺</button>
+  `;
+  document.body.appendChild(bar);
+
+  handleState(quiz);
+  lastKey = quiz.state + ':' + quiz.current_idx;
+}
+
+window.pTestNext = function() {
+  getAudioCtx();
+  const q = quiz;
+  if (q.state === 'waiting') {
+    q.state = 'ready';
+  } else if (q.state === 'ready') {
+    q.state = 'question'; q.current_idx = 0; q.question_started_at = Date.now();
+    tVotes = [0, 0, 0, 0];
+  } else if (q.state === 'question') {
+    q.state = 'answer';
+  } else if (q.state === 'answer') {
+    if (q.current_idx + 1 >= q.questions.length) {
+      q.state = 'finished';
+    } else {
+      q.state = 'question'; q.current_idx++; q.question_started_at = Date.now();
+      tVotes = [0, 0, 0, 0];
+    }
+  } else if (q.state === 'ranking') {
+    q.state = (q.current_idx >= 0) ? 'answer' : 'ready';
+  } else if (q.state === 'finished') {
+    pTestReset();
+    return;
+  }
+  handleState(q);
+  lastKey = q.state + ':' + q.current_idx;
+  updateTestBtnP();
+}
+
+function updateTestBtnP() {
+  const btn = document.getElementById('p-test-next');
+  if (!btn) return;
+  const q = quiz;
+  if (q.state === 'waiting') btn.textContent = '🚀 READY GO';
+  else if (q.state === 'ready') btn.textContent = '▶ 第1問';
+  else if (q.state === 'question') btn.textContent = '✨ 正解';
+  else if (q.state === 'answer') btn.textContent = (q.current_idx + 1 >= q.questions.length) ? '🏁 結果' : '▶ 次へ';
+  else if (q.state === 'ranking') btn.textContent = '↩ 戻る';
+  else if (q.state === 'finished') btn.textContent = '↺ 最初から';
+}
+
+window.pTestRanking = function() {
+  getAudioCtx();
+  quiz.state = 'ranking';
+  handleState(quiz);
+  lastKey = quiz.state + ':' + quiz.current_idx;
+  updateTestBtnP();
+}
+
+window.pTestReset = function() {
+  clearInterval(timerInt); timerInt = null;
+  clearInterval(countInt); countInt = null;
+  const cd = document.getElementById('p-countdown');
+  if (cd) cd.remove();
+  removeFinale();
+  tVotes = [0, 0, 0, 0];
+  quiz.state = 'waiting'; quiz.current_idx = -1; quiz.question_started_at = 0;
+  lastKey = null;
+  handleState(quiz);
+  lastKey = 'waiting:-1';
+  updateTestBtnP();
+}
+
 // ========== QRコード ==========
 function renderQR() {
   const url = location.href.replace(/\/[^\/]*$/, '/play.html');
@@ -557,10 +710,16 @@ document.addEventListener('DOMContentLoaded', () => {
   renderQR();
 
   if (EMBED) {
-    // 管理画面内プレビュー: クリック不要で即接続 (無音)
+    // 管理画面内プレビュー: クリック不要で即開始 (無音)
     document.getElementById('start-overlay').remove();
-    connect();
+    if (TESTP) setupTestP(); else connect();
     return;
+  }
+
+  if (TESTP) {
+    const ov = document.getElementById('start-overlay');
+    ov.querySelector('.big').textContent = '🧪 プロジェクター テストモード';
+    ov.querySelector('.small').textContent = 'クリックで音声ON+全画面。実機プロジェクターでの映りを検証できます';
   }
 
   document.getElementById('start-overlay').addEventListener('click', async () => {
@@ -568,6 +727,6 @@ document.addEventListener('DOMContentLoaded', () => {
     getAudioCtx();
     playStart();
     try { await document.documentElement.requestFullscreen(); } catch (e) {}
-    connect();
+    if (TESTP) setupTestP(); else connect();
   });
 });

@@ -1,5 +1,5 @@
-// 同期会クイズ v2.3 (2026-07-14) - admin.js
-console.log('同期会クイズ v2.3 (2026-07-14) - admin.js loaded');
+// 同期会クイズ v2.4 (2026-07-14) - admin.js
+console.log('同期会クイズ v2.4 (2026-07-14) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -467,7 +467,7 @@ async function refreshLive() {
   updateQuestionBoard(quiz);
 }
 
-// ========== 問題別データボード (平均回答時間 / 平均得点) ==========
+// ========== 問題別データボード (平均回答時間 / 正解率) ==========
 let testBoardRows = []; // 🧪テストモードの疑似データ
 
 // 参加者画面のテストから疑似データを受信
@@ -496,7 +496,7 @@ function renderTestBoard() {
   el.innerHTML = rows.map((r, i) => `<div class="qb-row" style="animation-delay:${i * 0.05}s">
     <span class="qb-q">第${r.idx + 1}問</span>
     <span class="qb-t">⏱ 平均 ${r.avgT.toFixed(1)}秒</span>
-    <span class="qb-p">🎯 平均 ${r.avgP.toFixed(0)}点</span>
+    <span class="qb-p">🎯 正解率 ${r.rate}%</span>
     <span class="qb-note">🧪</span>
   </div>`).join('');
 }
@@ -531,22 +531,14 @@ async function updateQuestionBoard(quiz) {
     const sumT = rows.reduce((s, a) => s + Math.min(a.elapsed_ms || limit, limit), 0)
                + Math.max(0, playersCount - rows.length) * limit;
     const avgT = sumT / playersCount / 1000;
-    // 平均得点 = その問題の総得点 ÷ 参加者数
+    // ① 正解率 = 正解者数 ÷ 参加者数
     const correct = qs[i] ? qs[i].correct : 0;
-    const cRows = rows.filter(a => a.choice === correct);
-    const cc = cRows.length;
-    let sumPts = 0;
-    cRows.forEach(a => {
-      const speed = Math.max(0, Math.round(100 * (1 - a.elapsed_ms / limit)));
-      let pts = 100 + speed + Math.round(150 / Math.max(cc, 1));
-      if (i === qs.length - 1) pts *= 2;
-      sumPts += pts;
-    });
-    const avgP = sumPts / playersCount;
+    const cc = rows.filter(a => a.choice === correct).length;
+    const rate = Math.round(cc / playersCount * 100);
     html += `<div class="qb-row" style="animation-delay:${i * 0.05}s">
       <span class="qb-q">第${i + 1}問</span>
       <span class="qb-t">⏱ 平均 ${avgT.toFixed(1)}秒</span>
-      <span class="qb-p">🎯 平均 ${avgP.toFixed(0)}点</span>
+      <span class="qb-p">🎯 正解率 ${rate}%</span>
     </div>`;
   }
   el.innerHTML = html || '<div class="qb-empty">正解発表後に自動で追加されます</div>';
@@ -684,10 +676,10 @@ function setupPreviewTabs() {
       pvMode = b.dataset.mode;
       const isTest = pvMode === 'test';
       document.getElementById('preview-frame').src =
-        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=23';
+        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=24';
       // プロジェクターを連動切替 (テスト時は参加者画面に追従する連動テストモード)
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=23' + (isTest ? '&test=1&follow=1' : '');
+        'projector.html?embed=1&v=24' + (isTest ? '&test=1&follow=1' : '');
       setProjTabActive(isTest ? 'test' : 'live');
       if (!isTest) { testBoardRows = []; }
       updateQuestionBoard(currentLiveQuiz);
@@ -706,7 +698,7 @@ function setupPreviewTabs() {
       document.querySelectorAll('.proj-col .pj-tab').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=23' + (b.dataset.mode === 'test' ? '&test=1' : '');
+        'projector.html?embed=1&v=24' + (b.dataset.mode === 'test' ? '&test=1' : '');
     });
   });
   const pjReload = document.querySelector('.proj-col .pj-reload');

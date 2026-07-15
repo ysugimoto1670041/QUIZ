@@ -1,5 +1,5 @@
-// 同期会クイズ v2.3 (2026-07-14) - play.js
-console.log('同期会クイズ v2.3 (2026-07-14) - play.js loaded');
+// 同期会クイズ v2.4 (2026-07-14) - play.js
+console.log('同期会クイズ v2.4 (2026-07-14) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -127,6 +127,105 @@ function playStart() {
   [400, 600, 800].forEach((f, i) => setTimeout(() => playTone(f, 0.15, 'square', 0.1), i * 100));
 }
 function playDrum(i) { playTone(180 + (i % 3) * 30, 0.07, 'square', 0.06); }
+
+// ==== v2.4 音響エンジン ====
+
+// シンバルクラッシュ (ノイズバースト)
+function playCrash(delay = 0) {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  setTimeout(() => {
+    try {
+      const len = Math.floor(ctx.sampleRate * 1.2);
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const f = ctx.createBiquadFilter();
+      f.type = 'highpass'; f.frequency.value = 5000;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.14, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.1);
+      src.connect(f); f.connect(g); g.connect(ctx.destination);
+      src.start();
+    } catch (e) {}
+  }, delay);
+}
+
+// ② 時間切れの鐘「カンカラカーン」
+function playTimeUpBell() {
+  const strike = (t, f, v) => setTimeout(() => {
+    playTone(f, 0.5, 'triangle', v);
+    playTone(f * 2.76, 0.35, 'sine', v * 0.55); // 金属的な倍音
+    playTone(f * 5.4, 0.18, 'sine', v * 0.3);
+  }, t);
+  strike(0, 1318, 0.18);
+  strike(170, 1318, 0.17);
+  strike(340, 1318, 0.16);
+  setTimeout(() => {
+    playTone(880, 1.3, 'triangle', 0.15);
+    playTone(880 * 2.76, 0.9, 'sine', 0.07);
+  }, 540);
+}
+
+// ③ セレブレーションファンファーレ (最終成績発表用・響き渡る豪華版)
+function playCelebrationFanfare() {
+  playCrash(0);
+  const seq = [
+    [523, 0, 0.16], [659, 130, 0.16], [784, 260, 0.16], [1047, 390, 0.28],
+    [784, 700, 0.14], [1047, 830, 0.14], [1319, 960, 0.32]
+  ];
+  seq.forEach(([f, t, d]) => setTimeout(() => {
+    playTone(f, d + 0.15, 'triangle', 0.16);
+    playTone(f / 2, d + 0.15, 'triangle', 0.08); // 低音の厚み
+  }, t));
+  // 持続する大団円コード + 2発目のクラッシュ
+  setTimeout(() => {
+    [523, 659, 784, 1047, 1319].forEach(f => playTone(f, 1.6, 'triangle', 0.09));
+    playCrash(0);
+  }, 1500);
+  setTimeout(() => {
+    [587, 740, 880, 1175].forEach(f => playTone(f, 1.4, 'triangle', 0.08));
+  }, 2600);
+}
+
+// ⑥ 出題スティング「ジャジャン!」(カウントダウン0の瞬間)
+function playQuestionSting() {
+  [330, 415, 494].forEach(f => playTone(f, 0.14, 'sawtooth', 0.08));
+  setTimeout(() => {
+    [392, 494, 587, 784].forEach(f => playTone(f, 0.45, 'sawtooth', 0.09));
+    playTone(98, 0.3, 'sine', 0.12);
+  }, 160);
+}
+
+// ④ 待機中BGM (ワクワク感のある8bit風ループ)
+let bgmTimer = null;
+let bgmStep = 0;
+const BGM_MELODY = [523, 659, 784, 659, 880, 784, 659, 523, 587, 698, 880, 698, 1047, 880, 784, 659];
+const BGM_BASS = [262, 262, 220, 220, 175, 175, 196, 196];
+
+function startWaitBgm() {
+  if (bgmTimer) return;
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  bgmStep = 0;
+  bgmTimer = setInterval(() => {
+    const s = bgmStep % 16;
+    const m = BGM_MELODY[s];
+    if (m) playTone(m, 0.13, 'square', 0.028);
+    if (s % 2 === 0) playTone(BGM_BASS[s / 2], 0.22, 'triangle', 0.045);
+    if (s % 4 === 0) playTone(90, 0.08, 'sine', 0.07);           // キック
+    if (s === 14) playTone(1568, 0.1, 'sine', 0.03);             // きらめき
+    bgmStep++;
+  }, 150);
+}
+
+function stopWaitBgm() {
+  clearInterval(bgmTimer);
+  bgmTimer = null;
+}
+
 
 // 残り時間が減るほど速く・高く・強くなる「心臓ドキドキ」音
 function playUrgeTick(frac) {
@@ -258,6 +357,8 @@ function toggleReadyGo(on) {
 function removeFinale() {
   const f = document.getElementById('finale-overlay');
   if (f) f.remove();
+  const mr = document.getElementById('my-result');
+  if (mr) mr.remove();
   finaleRunning = false;
 }
 
@@ -305,13 +406,16 @@ function handleStateChange(q) {
   if (state !== 'finished') removeFinale();
 
   if (state === 'waiting') {
+    startWaitBgm(); // ④ 待機中BGM
     toggleReadyGo(false);
     showScreen('waiting');
   } else if (state === 'ready') {
+    stopWaitBgm();
     if (lastState !== stateKey) playStart();
     toggleReadyGo(true);
     showScreen('waiting');
   } else if (state === 'question') {
+    stopWaitBgm();
     if (lastState !== stateKey) {
       mySelected = -1;
       showQuestion(q);
@@ -413,7 +517,7 @@ function showCountdown(effStart, onDone) {
       clearInterval(countdownInterval);
       countdownInterval = null;
       overlay.remove();
-      playCountBeep(true);
+      playQuestionSting(); // ⑥ 出題スティング
       onDone();
       return;
     }
@@ -477,6 +581,7 @@ function startTimer(q) {
     if (remaining <= 0) {
       clearInterval(timerInterval);
       timerInterval = null;
+      playTimeUpBell(); // ② 終了を告げる鐘
       if (!PREVIEW && mySelected < 0) {
         submitAnswer(-1);
       }
@@ -739,9 +844,10 @@ async function runFinale(arr) {
 
   // === 第1幕: タイトル + ファンファーレ ===
   stage.innerHTML = '<div class="finale-title">🎺 最終成績発表!</div>';
-  playGrandFanfare();
+  playCelebrationFanfare(); // ③ セレブレーションが響き渡る
   fireConfetti();
-  await wait(3200);
+  setTimeout(fireConfetti, 1500);
+  await wait(4200);
   if (!finaleRunning) return;
 
   // === 第2幕: 20位〜4位を下から順に ===
@@ -786,6 +892,29 @@ async function runFinale(arr) {
   ov.remove();
   finaleRunning = false;
   renderResultScreen(arr);
+
+  // ⑤ あなたの最終順位を画面中央に表示
+  if (!PREVIEW) {
+    const myIdx = arr.findIndex(pl => pl.id === myId);
+    if (myIdx >= 0) showMyResult(myIdx + 1, arr[myIdx].score, arr.length);
+  }
+}
+
+function showMyResult(rank, score, total) {
+  const old = document.getElementById('my-result');
+  if (old) old.remove();
+  const medal = rank === 1 ? '👑' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : rank <= 5 ? '🏅' : '🎖';
+  const d = document.createElement('div');
+  d.id = 'my-result';
+  d.innerHTML = `
+    <div class="mr-medal">${medal}</div>
+    <div class="mr-label">あなたの最終成績</div>
+    <div class="mr-rank">第 ${rank} 位</div>
+    <div class="mr-score">${score} 点 <small>/ ${total}人中</small></div>
+    <div class="mr-hint">タップで小さく表示</div>`;
+  d.addEventListener('click', () => d.classList.toggle('mini'));
+  document.body.appendChild(d);
+  playFanfareCorrect();
 }
 
 function bigReveal(stage, rank, p, medal) {
@@ -796,6 +925,7 @@ function bigReveal(stage, rank, p, medal) {
       <div class="fb-name">${escapeHtml(p.name)}</div>
       <div class="fb-score">${p.score} pts</div>
     </div>`;
+  playCrash();
   playFanfareCorrect();
   fireConfetti();
 }
@@ -813,8 +943,10 @@ function champion(stage, p) {
       <div class="champ-name">${escapeHtml(p.name)}</div>
       <div class="champ-score">${p.score} pts</div>
     </div>`;
-  playGrandFanfare();
-  setTimeout(playFanfareCorrect, 1600);
+  playCrash(0);
+  playCelebrationFanfare();
+  playCrash(1600);
+  setTimeout(playFanfareCorrect, 1900);
   fireConfetti();
   setTimeout(fireConfetti, 900);
   setTimeout(fireConfetti, 2000);
@@ -970,7 +1102,9 @@ window.testNext = function() {
 function handleTestState() {
   const q = currentQuiz;
   const btn = document.getElementById('test-next');
+  if (q.state !== 'waiting') stopWaitBgm();
   if (q.state === 'waiting') {
+    startWaitBgm();
     showScreen('waiting');
     btn.textContent = '▶ 第1問';
   } else if (q.state === 'question') {
@@ -1035,9 +1169,7 @@ function revealAnswerTest(q) {
   // 問題別データ(疑似)を管理画面のボードへ送信 → 機能チェック用
   if (bcTest) {
     const avgT = (myChoiceElapsed => (myChoiceElapsed / 1000 + 5 + Math.random() * 6) / 2)(testElapsed || 9000);
-    const perCorrect = 100 + 50 + Math.round(150 / Math.max(tCorrect, 1));
-    const avgP = tCorrect > 0 ? Math.round(tCorrect * perCorrect * (isLast ? 2 : 1) / tTotal) : 0;
-    bcTest.postMessage({ type: 'qstat', idx: q.current_idx, avgT: avgT, avgP: avgP });
+    bcTest.postMessage({ type: 'qstat', idx: q.current_idx, avgT: avgT, rate: tStat.rate });
   }
 }
 
@@ -1063,6 +1195,7 @@ window.testReset = function() {
   showScreen('waiting');
   if (bcTest) bcTest.postMessage({ type: 'reset' });
   broadcastTestState();
+  startWaitBgm();
   const btn = document.getElementById('test-next');
   if (btn) btn.textContent = '▶ 第1問';
 }

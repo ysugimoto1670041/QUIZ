@@ -1,5 +1,5 @@
-// 同期会クイズ v2.8 (2026-07-15) - play.js
-console.log('同期会クイズ v2.8 (2026-07-15) - play.js loaded');
+// 同期会クイズ v2.8.1 (2026-07-15) - play.js
+console.log('同期会クイズ v2.8.1 (2026-07-15) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -413,6 +413,20 @@ async function startWatchQuiz() {
     })
     .subscribe();
 
+  // スマホのスリープ復帰時に即座に最新状態へ追随
+  if (!startWatchQuiz._vis) {
+    startWatchQuiz._vis = true;
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState !== 'visible') return;
+      unlockAudio();
+      const q = await fetchQuiz();
+      if (q && (!currentQuiz || !currentQuiz.updated_at || q.updated_at >= currentQuiz.updated_at)) {
+        currentQuiz = q;
+        handleStateChange(q);
+      }
+    });
+  }
+
   // リアルタイム通知が届かない環境向けの保険 (2.5秒ごとに状態を再取得)
   // ※ 古いデータで新しい表示(正解発表など)を上書きしないよう updated_at で防御
   if (!startWatchQuiz._poll) {
@@ -696,16 +710,25 @@ async function revealAnswer(q) {
   if (revealedRounds.has(idx)) return;
   revealedRounds.add(idx);
 
-  // ③ 通信エラーが起きても必ず結果表示まで到達するよう防御
-  let ans = [];
+  // 回答データの取得。失敗した場合はロックを解除し、
+  // ポーリング(2.5秒後)で自動的に再試行する【自己修復】
+  // ※ スマホのスリープ復帰直後などは最初の通信が失敗しやすいため
+  let ans = null;
   let pCount = 0;
   try {
     const { data: answers, error } = await sb.from('answers').select('*').eq('q_idx', idx);
-    if (error) console.error(error);
+    if (error) throw error;
     ans = answers || [];
+  } catch (e) {
+    console.warn('結果データの取得に失敗。自動再試行します:', e);
+    revealedRounds.delete(idx); // ロック解除
+    lastState = null;           // 次のポーリングで再突入させる
+    return;
+  }
+  try {
     const { data: allPlayers } = await sb.from('players').select('id');
     pCount = (allPlayers || []).length;
-  } catch (e) { console.error('回答取得エラー:', e); }
+  } catch (e) { console.warn('参加者数の取得に失敗 (正答率なしで続行):', e); }
   const allCorrect = ans.filter(a => a.choice === correct);
   const myAns = ans.find(a => a.player_id === myId);
   const myCorrect = myAns && myAns.choice === correct;

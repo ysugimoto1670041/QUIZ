@@ -1,5 +1,5 @@
-// 同期会クイズ v2.8 (2026-07-15) - projector.js
-console.log('同期会クイズ v2.8 (2026-07-15) - projector.js loaded');
+// 同期会クイズ v2.8.1 (2026-07-15) - projector.js
+console.log('同期会クイズ v2.8.1 (2026-07-15) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -313,6 +313,16 @@ async function connect() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'answers' }, () => refreshAnswered())
     .subscribe();
 
+  // 画面復帰時に即座に最新状態へ追随
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible') return;
+    const { data } = await sb.from('quiz_state').select('*').eq('id', QUIZ_ROW_ID).maybeSingle();
+    if (data && (!quiz || !quiz.updated_at || data.updated_at >= quiz.updated_at)) {
+      quiz = data;
+      handleState(data);
+    }
+  });
+
   // リアルタイム通知が届かない環境向けの保険 (2.5秒ごとに状態を再取得)
   // ※ 古いデータで新しい表示(正解発表など)を上書きしないよう updated_at で防御
   setInterval(async () => {
@@ -507,6 +517,40 @@ function startTimerP(q) {
 }
 
 // ========== 回答発表 ==========
+async function updateRateBannerP(q, correct, attempt) {
+  let cc = 0, pCount = 0;
+  if (TESTP) {
+    cc = tVotes[correct] || 0;
+    pCount = tVotes.reduce((a, b) => a + b, 0) + 2; // 未回答2人と仮定
+  } else {
+    try {
+      const { data, error } = await sb.from('answers').select('choice').eq('q_idx', q.current_idx);
+      if (error) throw error;
+      cc = (data || []).filter(a => a.choice === correct).length;
+      const { data: pl } = await sb.from('players').select('id');
+      pCount = (pl || []).length;
+    } catch (e) {
+      console.warn('正答率の取得に失敗。自動再試行します:', e);
+      if (attempt < 5 && quiz && quiz.state === 'answer') {
+        setTimeout(() => updateRateBannerP(q, correct, attempt + 1), 2500);
+      }
+      return;
+    }
+  }
+  const rate = pCount > 0 ? Math.round(cc / pCount * 100) : 0;
+  const oldR = document.getElementById('p-rate');
+  if (oldR) oldR.remove();
+  if (pCount > 0) {
+    const r = document.createElement('div');
+    r.id = 'p-rate';
+    r.className = 'p-double';
+    r.style.background = 'linear-gradient(135deg, #42a5f5, #7e57c2)';
+    r.style.animation = 'none';
+    r.textContent = `📊 正答率 ${rate}%`;
+    document.getElementById('pq-mid').appendChild(r);
+  }
+}
+
 async function revealP(q) {
   clearInterval(timerInt); timerInt = null;
   clearInterval(countInt); countInt = null;
@@ -534,29 +578,8 @@ async function revealP(q) {
     }
   });
 
-  // 正答率バナー (正解者数 ÷ 参加者数)
-  let cc = 0, pCount = 0;
-  if (TESTP) {
-    cc = tVotes[correct] || 0;
-    pCount = tVotes.reduce((a, b) => a + b, 0) + 2; // 未回答2人と仮定
-  } else {
-    const { data } = await sb.from('answers').select('choice').eq('q_idx', q.current_idx);
-    cc = (data || []).filter(a => a.choice === correct).length;
-    const { data: pl } = await sb.from('players').select('id');
-    pCount = (pl || []).length;
-  }
-  const rate = pCount > 0 ? Math.round(cc / pCount * 100) : 0;
-  const oldR = document.getElementById('p-rate');
-  if (oldR) oldR.remove();
-  if (pCount > 0) {
-    const r = document.createElement('div');
-    r.id = 'p-rate';
-    r.className = 'p-double';
-    r.style.background = 'linear-gradient(135deg, #42a5f5, #7e57c2)';
-    r.style.animation = 'none';
-    r.textContent = `📊 正答率 ${rate}%`;
-    document.getElementById('pq-mid').appendChild(r); // ④ ヘッダー中央へ
-  }
+  // 正答率バナー (正解者数 ÷ 参加者数)。取得失敗時は2.5秒後に自動再試行【自己修復】
+  updateRateBannerP(q, correct, 0);
   playFanfare();
   fireConfetti();
 }

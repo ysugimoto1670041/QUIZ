@@ -1,5 +1,5 @@
-// 同期会クイズ v2.8.1 (2026-07-15) - projector.js
-console.log('同期会クイズ v2.8.1 (2026-07-15) - projector.js loaded');
+// 同期会クイズ v2.9 (2026-07-15) - projector.js
+console.log('同期会クイズ v2.9 (2026-07-15) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -303,11 +303,14 @@ async function connect() {
   if (data) { quiz = data; handleState(data); }
   refreshCount();
 
+  // 【重要】RT通知は不完全な行(questions欠落)で届き得るため、合図としてのみ使いRESTで再取得
   sb.channel('projector-watch')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_state', filter: `id=eq.${QUIZ_ROW_ID}` }, (payload) => {
-      if (!payload.new) return;
-      quiz = payload.new;
-      handleState(quiz);
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_state', filter: `id=eq.${QUIZ_ROW_ID}` }, async () => {
+      const { data } = await sb.from('quiz_state').select('*').eq('id', QUIZ_ROW_ID).maybeSingle();
+      if (data && Array.isArray(data.questions)) {
+        quiz = data;
+        handleState(data);
+      }
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => refreshCount())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'answers' }, () => refreshAnswered())
@@ -349,6 +352,7 @@ async function refreshAnswered() {
 
 // ========== 状態ハンドリング ==========
 function handleState(q) {
+  if (!q || !Array.isArray(q.questions)) return; // 不完全データ防御
   const key = q.state + ':' + q.current_idx;
   if (q.state !== 'finished') removeFinale();
 
@@ -557,7 +561,7 @@ async function revealP(q) {
   const cd = document.getElementById('p-countdown');
   if (cd) cd.remove();
 
-  const question = q.questions[q.current_idx];
+  const question = (q.questions || [])[q.current_idx];
   if (!question) return;
   const correct = question.correct;
 

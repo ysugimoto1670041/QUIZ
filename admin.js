@@ -1,5 +1,5 @@
-// 同期会クイズ v2.8.1 (2026-07-15) - admin.js
-console.log('同期会クイズ v2.8.1 (2026-07-15) - admin.js loaded');
+// 同期会クイズ v2.9 (2026-07-15) - admin.js
+console.log('同期会クイズ v2.9 (2026-07-15) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -42,6 +42,51 @@ document.querySelectorAll('.tab').forEach(t => {
 // ========== 問題リスト表示 ==========
 const MAX_QUESTIONS = 10;
 
+// ========== ③ 問題の並び替え ==========
+let dragFromIdx = -1;
+
+function reorderQuestion(from, to) {
+  if (from === to || from < 0 || to < 0 || from >= questions.length || to >= questions.length) return;
+  const [moved] = questions.splice(from, 1);
+  questions.splice(to, 0, moved);
+  // 編集中の問題番号を追随させる (編集内容の保存先ずれを防止)
+  if (editingIndex === from) editingIndex = to;
+  else if (editingIndex > from && editingIndex <= to) editingIndex--;
+  else if (editingIndex < from && editingIndex >= to) editingIndex++;
+  saveLocal();
+  scheduleDraftSave(); // 並び順もクラウドに共有 (全端末・本番出題順に反映)
+  renderQuestionList();
+}
+
+window.moveQuestion = function(i, dir) {
+  reorderQuestion(i, i + dir);
+}
+
+function bindQuestionDnD() {
+  document.querySelectorAll('#q-list .q-item').forEach(el => {
+    el.addEventListener('dragstart', () => {
+      dragFromIdx = parseInt(el.dataset.qi);
+      el.classList.add('dragging');
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging');
+      document.querySelectorAll('#q-list .q-item').forEach(x => x.classList.remove('drag-over'));
+    });
+    el.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      el.classList.add('drag-over');
+    });
+    el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+    el.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const to = parseInt(el.dataset.qi);
+      el.classList.remove('drag-over');
+      reorderQuestion(dragFromIdx, to);
+      dragFromIdx = -1;
+    });
+  });
+}
+
 function renderQuestionList() {
   const list = document.getElementById('q-list');
   const full = questions.length >= MAX_QUESTIONS;
@@ -59,15 +104,19 @@ function renderQuestionList() {
     return;
   }
   list.innerHTML = questions.map((q, i) => `
-    <div class="q-item">
+    <div class="q-item" draggable="true" data-qi="${i}" title="つまんで上下に移動できます">
+      <span class="q-grip" aria-hidden="true">⠿</span>
       <div class="q-num">${i + 1}</div>
       <div class="q-text">${escapeHtml(q.text || '(問題文なし)')}</div>
       <div class="q-actions">
+        <button class="icon-btn" onclick="moveQuestion(${i}, -1)" title="上へ" ${i === 0 ? 'disabled' : ''}>▲</button>
+        <button class="icon-btn" onclick="moveQuestion(${i}, 1)" title="下へ" ${i === questions.length - 1 ? 'disabled' : ''}>▼</button>
         <button class="icon-btn" onclick="openQuestionEditor(${i})" title="編集">✏️</button>
         <button class="icon-btn" onclick="deleteQuestion(${i})" title="削除">🗑️</button>
       </div>
     </div>
   `).join('') + (full ? '<div class="q-complete">🎉 問題の設定は全て完了です(10問)</div>' : '');
+  bindQuestionDnD();
 }
 
 function escapeHtml(s) {
@@ -676,10 +725,10 @@ function setupPreviewTabs() {
       pvMode = b.dataset.mode;
       const isTest = pvMode === 'test';
       document.getElementById('preview-frame').src =
-        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=31';
+        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=32';
       // プロジェクターを連動切替 (テスト時は参加者画面に追従する連動テストモード)
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=31' + (isTest ? '&test=1&follow=1' : '');
+        'projector.html?embed=1&v=32' + (isTest ? '&test=1&follow=1' : '');
       setProjTabActive(isTest ? 'test' : 'live');
       if (!isTest) { testBoardRows = []; }
       updateQuestionBoard(currentLiveQuiz);
@@ -698,7 +747,7 @@ function setupPreviewTabs() {
       document.querySelectorAll('.proj-col .pj-tab').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=31' + (b.dataset.mode === 'test' ? '&test=1' : '');
+        'projector.html?embed=1&v=32' + (b.dataset.mode === 'test' ? '&test=1' : '');
     });
   });
   const pjReload = document.querySelector('.proj-col .pj-reload');

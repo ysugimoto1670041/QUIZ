@@ -1,5 +1,5 @@
-// 同期会クイズ v2.8.1 (2026-07-15) - play.js
-console.log('同期会クイズ v2.8.1 (2026-07-15) - play.js loaded');
+// 同期会クイズ v2.9 (2026-07-15) - play.js
+console.log('同期会クイズ v2.9 (2026-07-15) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -79,6 +79,7 @@ function getAudioCtx() {
 }
 
 function playTone(freq, duration, type = 'sine', volume = 0.2) {
+  if (!SOUND_ON) return; // ② スマホ(ライブ)は無音
   const ctx = getAudioCtx();
   if (!ctx) return;
   if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) {} }
@@ -135,8 +136,12 @@ function playStart() {
 }
 function playDrum(i) { playTone(180 + (i % 3) * 30, 0.07, 'square', 0.06); }
 
-// スマホでの無音対策: 最初のタッチ/クリックでAudioContextを確実にアンロック
+// ② ライブ本番では参加者のスマホから音を出さない (音は管理者PC/プロジェクターから流す)
+//    テストモード(管理者PCでの動作確認)のみ発音する
+const SOUND_ON = TEST;
+
 function unlockAudio() {
+  if (!SOUND_ON) return;
   const ctx = getAudioCtx();
   if (!ctx) return;
   try {
@@ -155,6 +160,7 @@ document.addEventListener('click', unlockAudio, { once: true });
 
 // シンバルクラッシュ (ノイズバースト)
 function playCrash(delay = 0) {
+  if (!SOUND_ON) return; // ② スマホ(ライブ)は無音
   const ctx = getAudioCtx();
   if (!ctx) return;
   setTimeout(() => {
@@ -233,6 +239,7 @@ const BGM_MELODY = [523, 659, 784, 659, 880, 784, 659, 523, 587, 698, 880, 698, 
 const BGM_BASS = [262, 262, 220, 220, 175, 175, 196, 196];
 
 function startWaitBgm() {
+  if (!SOUND_ON) return; // ② スマホ(ライブ)は無音
   if (bgmTimer) return;
   const ctx = getAudioCtx();
   if (!ctx) return;
@@ -404,12 +411,16 @@ async function startWatchQuiz() {
     handleStateChange(initial);
   }
 
+  // 【重要】リアルタイム通知のペイロードは、questions(画像入りの大きな列)が
+  // 欠落した不完全なデータで届くことがある (Supabase Realtimeのサイズ制限)。
+  // そのため通知は「変化があった合図」としてのみ使い、データは必ずRESTで完全な行を再取得する。
   sb.channel('player-watch-' + Math.random().toString(36).slice(2, 8))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_state', filter: `id=eq.${QUIZ_ROW_ID}` }, (payload) => {
-      const q = payload.new;
-      if (!q) return;
-      currentQuiz = q;
-      handleStateChange(q);
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_state', filter: `id=eq.${QUIZ_ROW_ID}` }, async () => {
+      const q = await fetchQuiz();
+      if (q && Array.isArray(q.questions)) {
+        currentQuiz = q;
+        handleStateChange(q);
+      }
     })
     .subscribe();
 
@@ -441,6 +452,7 @@ async function startWatchQuiz() {
 }
 
 function handleStateChange(q) {
+  if (!q || !Array.isArray(q.questions)) return; // 不完全データ防御
   const state = q.state;
   const idx = q.current_idx;
   const stateKey = state + ':' + idx;
@@ -690,10 +702,10 @@ async function revealAnswer(q) {
   if (cdOverlay) cdOverlay.remove();
 
   const idx = q.current_idx;
-  const question = q.questions[idx];
+  const question = (q.questions || [])[idx];
   if (!question) return;
   const correct = question.correct;
-  const isLast = idx === q.questions.length - 1;
+  const isLast = idx === (q.questions || []).length - 1;
 
   showScreen('question');
   const choicesEl = document.getElementById('choices');

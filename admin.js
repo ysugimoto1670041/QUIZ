@@ -1,5 +1,5 @@
-// 同期会クイズ v2.2 (2026-07-14) - admin.js
-console.log('同期会クイズ v2.2 (2026-07-14) - admin.js loaded');
+// 同期会クイズ v2.3 (2026-07-14) - admin.js
+console.log('同期会クイズ v2.3 (2026-07-14) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -340,7 +340,7 @@ window.toggleRanking = async function() {
     await upsertQuiz({ state: prev });
   } else {
     if (quiz.state === 'question') {
-      alert('回答受付中はランキングを表示できません。解答発表の後に押してください。');
+      alert('回答受付中はランキングを表示できません。回答発表の後に押してください。');
       return;
     }
     rankingPrevState = quiz.state;
@@ -365,7 +365,7 @@ window.nextStep = async function() {
 
   if (state === 'waiting' || state === 'ready') {
     if (!(quiz.questions || []).length) {
-      alert('問題が配信されていません。\nまず「▶ クイズ開始(問題を配信)」を押してから「第1問を開始」を押してください。');
+      alert('問題が配信されていません。\nまず「▶ クイズスタート」を押してから「第1問を開始」を押してください。');
       return;
     }
     await upsertQuiz({
@@ -467,10 +467,46 @@ async function refreshLive() {
   updateQuestionBoard(quiz);
 }
 
-// ========== ⑨ 問題別データボード (平均回答時間 / 平均得点) ==========
+// ========== 問題別データボード (平均回答時間 / 平均得点) ==========
+let testBoardRows = []; // 🧪テストモードの疑似データ
+
+// 参加者画面のテストから疑似データを受信
+if ('BroadcastChannel' in window) {
+  const bcAdmin = new BroadcastChannel('ltcb-test-sync');
+  bcAdmin.onmessage = (ev) => {
+    const m = ev.data || {};
+    if (m.type === 'qstat') {
+      testBoardRows[m.idx] = m;
+      if (pvMode === 'test') renderTestBoard();
+    } else if (m.type === 'reset') {
+      testBoardRows = [];
+      if (pvMode === 'test') renderTestBoard();
+    }
+  };
+}
+
+function renderTestBoard() {
+  const el = document.getElementById('q-board');
+  if (!el) return;
+  const rows = testBoardRows.filter(Boolean);
+  if (rows.length === 0) {
+    el.innerHTML = '<div class="qb-empty">🧪 テストで正解発表すると疑似データが表示されます</div>';
+    return;
+  }
+  el.innerHTML = rows.map((r, i) => `<div class="qb-row" style="animation-delay:${i * 0.05}s">
+    <span class="qb-q">第${r.idx + 1}問</span>
+    <span class="qb-t">⏱ 平均 ${r.avgT.toFixed(1)}秒</span>
+    <span class="qb-p">🎯 平均 ${r.avgP.toFixed(0)}点</span>
+    <span class="qb-note">🧪</span>
+  </div>`).join('');
+}
+
 async function updateQuestionBoard(quiz) {
   const el = document.getElementById('q-board');
-  if (!el || !quiz) return;
+  if (!el) return;
+  // 🧪 テストモード中は疑似データで機能チェック
+  if (pvMode === 'test') { renderTestBoard(); return; }
+  if (!quiz) return;
   const qs = quiz.questions || [];
 
   let doneUpTo = -1;
@@ -631,14 +667,30 @@ function startElapsedTicker() {
 }
 
 // ========== プレビュー/テスト切替 ==========
+let pvMode = 'preview'; // 参加者プレビューの現在モード
+
+function setProjTabActive(mode) {
+  document.querySelectorAll('.proj-col .pj-tab').forEach(x => {
+    x.classList.toggle('active', x.dataset.mode === mode);
+  });
+}
+
 function setupPreviewTabs() {
-  // 参加者画面 (ライブ/テスト)
+  // 参加者画面 (ライブ/テスト) — 切替時はプロジェクターも同モードに連動
   document.querySelectorAll('.preview-col .pv-tab').forEach(b => {
     b.addEventListener('click', () => {
       document.querySelectorAll('.preview-col .pv-tab').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
+      pvMode = b.dataset.mode;
+      const isTest = pvMode === 'test';
       document.getElementById('preview-frame').src =
-        'play.html?' + (b.dataset.mode === 'test' ? 'test=1' : 'preview=1');
+        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=23';
+      // プロジェクターを連動切替 (テスト時は参加者画面に追従する連動テストモード)
+      document.getElementById('projector-frame').src =
+        'projector.html?embed=1&v=23' + (isTest ? '&test=1&follow=1' : '');
+      setProjTabActive(isTest ? 'test' : 'live');
+      if (!isTest) { testBoardRows = []; }
+      updateQuestionBoard(currentLiveQuiz);
     });
   });
   const reload = document.querySelector('.preview-col .pv-reload');
@@ -654,7 +706,7 @@ function setupPreviewTabs() {
       document.querySelectorAll('.proj-col .pj-tab').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1' + (b.dataset.mode === 'test' ? '&test=1' : '');
+        'projector.html?embed=1&v=23' + (b.dataset.mode === 'test' ? '&test=1' : '');
     });
   });
   const pjReload = document.querySelector('.proj-col .pj-reload');

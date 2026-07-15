@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 同期会クイズ v2.2 (2026-07-14) -->
+<!-- 同期会クイズ v2.3 (2026-07-14) -->
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -184,7 +184,7 @@ body {
   margin-bottom: 2vh;
   animation: popIn 0.5s var(--spring);
 }
-.pq-text { font-size: 4.2vh; font-weight: 900; line-height: 1.4; flex: 1; word-break: break-word; }
+.pq-text { font-size: 4.6vh; font-weight: 900; line-height: 1.4; flex: 1; word-break: break-word; }
 .pq-image { max-height: 34vh; max-width: 44vw; object-fit: contain; border-radius: 1.5vh; }
 .p-choices {
   width: 100%; flex: 1;
@@ -199,7 +199,7 @@ body {
   border-radius: 2.4vh;
   display: flex; align-items: center; justify-content: center;
   gap: 1.5vw;
-  font-size: 3.6vh; font-weight: 900;
+  font-size: 4.8vh; font-weight: 900;
   padding: 1.5vh 2vw;
   box-shadow: 0 6px 20px rgba(0,0,0,0.08);
   animation: popIn 0.5s var(--spring) backwards;
@@ -412,8 +412,8 @@ body {
   transform: translateY(-50%);
   background: var(--deep); color: var(--gold);
   font-family: 'Fredoka';
-  font-weight: 700; font-size: 2.6vh;
-  padding: 0.5vh 1.4vw;
+  font-weight: 700; font-size: 3.6vh;
+  padding: 0.6vh 1.6vw;
   border-radius: 999px;
   z-index: 3;
   animation: popIn 0.3s var(--spring);
@@ -538,6 +538,16 @@ body {
   font-weight: 900; font-size: 1.8vh;
   padding: 0.7vh 1.5vw;
   border-radius: 999px;
+}
+
+/* ==== v2.3 ==== */
+.p-choice { overflow: visible; }
+.countdown-ready {
+  font-weight: 900;
+  font-size: 6vh;
+  color: white;
+  text-shadow: 0 0.6vh 3vh rgba(214,40,92,0.8);
+  animation: readyPulseP 0.8s ease-in-out infinite;
 }
 </style>
 </head>

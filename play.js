@@ -1,11 +1,11 @@
-// 同期会クイズ v2.2 (2026-07-14) - play.js
-console.log('同期会クイズ v2.2 (2026-07-14) - play.js loaded');
+// 同期会クイズ v2.3 (2026-07-14) - play.js
+console.log('同期会クイズ v2.3 (2026-07-14) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
 const TEST = _params.has('test');
 
-const COUNTDOWN_MS = 3000;
+const COUNTDOWN_MS = 5500; // 配信ディレイ吸収2.5秒 + 3・2・1カウント3秒
 
 // ========== Supabase初期化 ==========
 let sb = null;
@@ -44,6 +44,18 @@ const revealedRounds = new Set();
 // テストモード用
 let testChoice = -1;
 let testElapsed = 0;
+const bcTest = (TEST && 'BroadcastChannel' in window) ? new BroadcastChannel('ltcb-test-sync') : null;
+
+function broadcastTestState() {
+  if (!bcTest || !currentQuiz) return;
+  bcTest.postMessage({
+    type: 'state',
+    state: currentQuiz.state,
+    current_idx: currentQuiz.current_idx,
+    question_started_at: currentQuiz.question_started_at,
+    time_limit: currentQuiz.time_limit
+  });
+}
 
 function effectiveStart(q) {
   return (q.question_started_at || 0) + COUNTDOWN_MS;
@@ -273,10 +285,14 @@ async function startWatchQuiz() {
     .subscribe();
 
   // リアルタイム通知が届かない環境向けの保険 (2.5秒ごとに状態を再取得)
+  // ※ 古いデータで新しい表示(正解発表など)を上書きしないよう updated_at で防御
   if (!startWatchQuiz._poll) {
     startWatchQuiz._poll = setInterval(async () => {
       const q = await fetchQuiz();
-      if (q) { currentQuiz = q; handleStateChange(q); }
+      if (q && (!currentQuiz || !currentQuiz.updated_at || q.updated_at >= currentQuiz.updated_at)) {
+        currentQuiz = q;
+        handleStateChange(q);
+      }
     }, 2500);
   }
 }
@@ -355,6 +371,8 @@ function showQuestion(q) {
   // 最終問題はダブルスコアを強調表示
   const oldBanner = document.getElementById('double-banner');
   if (oldBanner) oldBanner.remove();
+  const oldRate = document.getElementById('rate-banner');
+  if (oldRate) oldRate.remove();
   if (idx === q.questions.length - 1) {
     const b = document.createElement('div');
     b.id = 'double-banner';
@@ -402,8 +420,12 @@ function showCountdown(effStart, onDone) {
     const sec = Math.ceil(remaining / 1000);
     if (sec !== lastShown) {
       lastShown = sec;
-      overlay.innerHTML = `<div class="countdown-num">${sec}</div>`;
-      playCountBeep(false);
+      if (sec <= 3) {
+        overlay.innerHTML = `<div class="countdown-num">${sec}</div>`;
+        playCountBeep(false);
+      } else {
+        overlay.innerHTML = `<div class="countdown-ready">まもなく出題!</div>`;
+      }
     }
   }
   tick();
@@ -502,7 +524,7 @@ async function submitAnswer(i) {
   if (error) console.error(error);
 }
 
-// ========== 解答発表 ==========
+// ========== 回答発表 ==========
 async function revealAnswer(q) {
   clearInterval(timerInterval); timerInterval = null;
   clearInterval(countdownInterval); countdownInterval = null;
@@ -555,6 +577,7 @@ async function revealAnswer(q) {
     if (isLast) myPointsThisRound *= 2; // 最終問題はダブルスコア
   }
 
+  showRateBanner(rateStat); // 次の質問まで表示し続ける
   showRevealOverlay(myCorrect, myPointsThisRound, isLast && myCorrect, rateStat);
 
   if (myCorrect && myPointsThisRound > 0) {
@@ -562,6 +585,17 @@ async function revealAnswer(q) {
     const newScore = (currentPlayer ? currentPlayer.score : 0) + myPointsThisRound;
     await sb.from('players').update({ score: newScore }).eq('id', myId);
   }
+}
+
+function showRateBanner(rateStat) {
+  const old = document.getElementById('rate-banner');
+  if (old) old.remove();
+  if (!rateStat || rateStat.total <= 0) return;
+  const b = document.createElement('div');
+  b.id = 'rate-banner';
+  b.textContent = `📊 正答率 ${rateStat.rate}% (${rateStat.correctCount}/参加${rateStat.total}人)`;
+  const qs = document.getElementById('screen-question');
+  qs.insertBefore(b, qs.firstChild);
 }
 
 function showRevealOverlay(correct, points, isDouble, rateStat) {
@@ -895,6 +929,8 @@ function setupTestMode() {
   document.getElementById('player-name').textContent = '🧪 テスト';
   showScreen('waiting');
 
+  broadcastTestState();
+
   const bar = document.createElement('div');
   bar.id = 'test-bar';
   bar.innerHTML = `
@@ -924,9 +960,11 @@ window.testNext = function() {
   } else if (q.state === 'ranking') {
     q.state = (q.current_idx >= 0) ? 'answer' : 'waiting';
     handleTestState();
+    broadcastTestState();
     return;
   }
   handleTestState();
+  broadcastTestState();
 }
 
 function handleTestState() {
@@ -940,7 +978,7 @@ function handleTestState() {
     testChoice = -1;
     testElapsed = 0;
     showQuestion(q);
-    btn.textContent = '✨ 解答';
+    btn.textContent = '✨ 回答';
   } else if (q.state === 'answer') {
     revealAnswerTest(q);
     btn.textContent = (q.current_idx + 1 >= q.questions.length) ? '🏁 結果発表' : '▶ 次へ';
@@ -988,15 +1026,25 @@ function revealAnswerTest(q) {
   }
   const tTotal = testVotes.reduce((a, b) => a + b, 0) + 2; // 未回答2人と仮定
   const tCorrect = testVotes[correct] || 0;
-  showRevealOverlay(myCorrect, points, isLast && myCorrect, {
+  const tStat = {
     total: tTotal, correctCount: tCorrect,
     rate: tTotal > 0 ? Math.round(tCorrect / tTotal * 100) : 0
-  });
+  };
+  showRateBanner(tStat); // 次の質問まで表示し続ける
+  showRevealOverlay(myCorrect, points, isLast && myCorrect, tStat);
+  // 問題別データ(疑似)を管理画面のボードへ送信 → 機能チェック用
+  if (bcTest) {
+    const avgT = (myChoiceElapsed => (myChoiceElapsed / 1000 + 5 + Math.random() * 6) / 2)(testElapsed || 9000);
+    const perCorrect = 100 + 50 + Math.round(150 / Math.max(tCorrect, 1));
+    const avgP = tCorrect > 0 ? Math.round(tCorrect * perCorrect * (isLast ? 2 : 1) / tTotal) : 0;
+    bcTest.postMessage({ type: 'qstat', idx: q.current_idx, avgT: avgT, avgP: avgP });
+  }
 }
 
 window.testRanking = function() {
   getAudioCtx();
   currentQuiz.state = 'ranking';
+  broadcastTestState();
   showRankingScreen();
   const btn = document.getElementById('test-next');
   btn.textContent = '↩ 戻る';
@@ -1013,6 +1061,8 @@ window.testReset = function() {
   mySelected = -1;
   lastState = null;
   showScreen('waiting');
+  if (bcTest) bcTest.postMessage({ type: 'reset' });
+  broadcastTestState();
   const btn = document.getElementById('test-next');
   if (btn) btn.textContent = '▶ 第1問';
 }

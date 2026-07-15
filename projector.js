@@ -1,12 +1,14 @@
-// 同期会クイズ v2.2 (2026-07-14) - projector.js
-console.log('同期会クイズ v2.2 (2026-07-14) - projector.js loaded');
+// 同期会クイズ v2.3 (2026-07-14) - projector.js
+console.log('同期会クイズ v2.3 (2026-07-14) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
-const COUNTDOWN_MS = 3000;
+const COUNTDOWN_MS = 5500; // 配信ディレイ吸収2.5秒 + 3・2・1カウント3秒
 // ?embed=1 : 管理画面内のプレビュー用 (無音・自動接続・全画面化なし)
 const EMBED = new URLSearchParams(location.search).has('embed');
 // ?test=1 : テストモード (DB進行と切り離してローカル再生。実機プロジェクターの映りを検証できる)
 const TESTP = new URLSearchParams(location.search).has('test');
+// ?follow=1 : 参加者画面のテストモードに同期して動く「連動テスト」
+const FOLLOW = new URLSearchParams(location.search).has('follow');
 let tVotes = [0, 0, 0, 0];
 
 let sb = null;
@@ -172,9 +174,13 @@ async function connect() {
     .subscribe();
 
   // リアルタイム通知が届かない環境向けの保険 (2.5秒ごとに状態を再取得)
+  // ※ 古いデータで新しい表示(正解発表など)を上書きしないよう updated_at で防御
   setInterval(async () => {
     const { data } = await sb.from('quiz_state').select('*').eq('id', QUIZ_ROW_ID).maybeSingle();
-    if (data) { quiz = data; handleState(data); }
+    if (data && (!quiz || !quiz.updated_at || data.updated_at >= quiz.updated_at)) {
+      quiz = data;
+      handleState(data);
+    }
     refreshCount();
   }, 2500);
 }
@@ -302,8 +308,12 @@ function showCountdownP(effStart, onDone) {
     const sec = Math.ceil(remaining / 1000);
     if (sec !== lastShown) {
       lastShown = sec;
-      overlay.innerHTML = `<div class="p-count-num">${sec}</div>`;
-      playCountBeep(false);
+      if (sec <= 3) {
+        overlay.innerHTML = `<div class="p-count-num">${sec}</div>`;
+        playCountBeep(false);
+      } else {
+        overlay.innerHTML = `<div class="countdown-ready">まもなく出題!</div>`;
+      }
     }
   }
   tick();
@@ -348,7 +358,7 @@ function startTimerP(q) {
   }, 100);
 }
 
-// ========== 解答発表 ==========
+// ========== 回答発表 ==========
 async function revealP(q) {
   clearInterval(timerInt); timerInt = null;
   clearInterval(countInt); countInt = null;
@@ -600,6 +610,48 @@ function sampleQuestionsP() {
   ];
 }
 
+async function setupFollowP() {
+  quiz = { state: 'waiting', current_idx: -1, questions: sampleQuestionsP(), time_limit: 15, question_started_at: 0 };
+  try {
+    if (typeof SUPABASE_URL !== 'undefined' && SUPABASE_URL && !SUPABASE_URL.includes('YOUR_')) {
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      const { data } = await sb.from('quiz_draft').select('questions, time_limit').eq('id', 1).maybeSingle();
+      if (data && Array.isArray(data.questions) && data.questions.length > 0) {
+        quiz.questions = data.questions;
+        if (data.time_limit) quiz.time_limit = data.time_limit;
+      }
+    }
+  } catch (e) { console.warn(e); }
+
+  const badge = document.createElement('div');
+  badge.className = 'p-test-badge';
+  badge.textContent = '🧪 連動テスト (参加者画面と同期)';
+  document.body.appendChild(badge);
+
+  if ('BroadcastChannel' in window) {
+    const bc = new BroadcastChannel('ltcb-test-sync');
+    bc.onmessage = (ev) => {
+      const m = ev.data || {};
+      if (m.type === 'reset') {
+        tVotes = [0, 0, 0, 0];
+        removeFinale();
+        quiz.state = 'waiting'; quiz.current_idx = -1; quiz.question_started_at = 0;
+        lastKey = null;
+        handleState(quiz);
+        return;
+      }
+      if (m.type !== 'state') return;
+      if (m.state === 'question' && quiz.state !== 'question') tVotes = [0, 0, 0, 0];
+      quiz.state = m.state;
+      quiz.current_idx = m.current_idx;
+      quiz.question_started_at = m.question_started_at;
+      if (m.time_limit) quiz.time_limit = m.time_limit;
+      handleState(quiz);
+    };
+  }
+  handleState(quiz);
+}
+
 async function setupTestP() {
   quiz = { state: 'waiting', current_idx: -1, questions: sampleQuestionsP(), time_limit: 15, question_started_at: 0 };
 
@@ -712,7 +764,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (EMBED) {
     // 管理画面内プレビュー: クリック不要で即開始 (無音)
     document.getElementById('start-overlay').remove();
-    if (TESTP) setupTestP(); else connect();
+    if (TESTP && FOLLOW) setupFollowP();
+    else if (TESTP) setupTestP();
+    else connect();
     return;
   }
 
@@ -727,6 +781,8 @@ document.addEventListener('DOMContentLoaded', () => {
     getAudioCtx();
     playStart();
     try { await document.documentElement.requestFullscreen(); } catch (e) {}
-    if (TESTP) setupTestP(); else connect();
+    if (TESTP && FOLLOW) setupFollowP();
+    else if (TESTP) setupTestP();
+    else connect();
   });
 });

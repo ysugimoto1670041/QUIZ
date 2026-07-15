@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 同期会クイズ v2.6 (2026-07-15) -->
+<!-- 同期会クイズ v2.7.1 (2026-07-15) -->
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -1033,6 +1033,25 @@ body.preview .answered-status { bottom: 78px; } /* テストバーと重なら�
 #reveal-overlay.stay .reveal-points { font-size: 14px; animation: none; margin: 0; }
 #reveal-overlay.stay .double-badge { font-size: 12px; animation: none; margin: 0; }
 #reveal-overlay.stay .reveal-rate { font-size: 12px; margin: 0; padding: 3px 10px; background: rgba(255,255,255,0.18); }
+
+/* ==== v2.7 ==== */
+/* ② くす玉をオーバーレイ直下に配置 (画面上部で確実に割れる) */
+#finale-overlay > .kusudama.ku-top {
+  position: absolute;
+  top: 8px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+}
+.ku-top .ku-half { top: 0; }
+.ku-top .ku-ribbons { top: 100px; }
+.ku-top .ku-banner { top: 120px; }
+.champ { margin-top: 150px; }
+
+/* ==== v2.7.1 ==== */
+/* ② 最終発表: 固定枠に名前が埋まっていく */
+.finale-row.pending { opacity: 0.4; }
+.finale-row.pending .fr-name { color: #bbb; letter-spacing: 0.3em; }
+.finale-row.filled { animation: popIn 0.45s var(--spring); opacity: 1; }
 </style>
 </head>
 <body>

@@ -1,5 +1,5 @@
-// 同期会クイズ v2.6 (2026-07-15) - projector.js
-console.log('同期会クイズ v2.6 (2026-07-15) - projector.js loaded');
+// 同期会クイズ v2.7.1 (2026-07-15) - projector.js
+console.log('同期会クイズ v2.7.1 (2026-07-15) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -381,18 +381,16 @@ function showQuestionP(q) {
     img.classList.add('hidden');
   }
 
-  const oldR2 = document.getElementById('p-rate');
-  if (oldR2) oldR2.remove();
-  // 最終問題はダブルスコアを強調
-  const oldD = document.getElementById('p-double');
-  if (oldD) oldD.remove();
+
+  // ④ バナー類はヘッダー中央に表示 (選択肢の位置を動かさない)
+  const mid = document.getElementById('pq-mid');
+  mid.innerHTML = '';
   if (idx === q.questions.length - 1) {
     const d = document.createElement('div');
     d.id = 'p-double';
     d.className = 'p-double';
-    d.textContent = '🔥 最終問題!ダブルスコアチャンス!!';
-    const pq = document.getElementById('p-question');
-    pq.insertBefore(d, pq.querySelector('.pq-card'));
+    d.textContent = '🔥 最終問題!ダブルスコア!!';
+    mid.appendChild(d);
   }
 
   const labels = ['A', 'B', 'C', 'D'];
@@ -506,8 +504,18 @@ async function revealP(q) {
   showP('question');
   document.querySelectorAll('.p-choice').forEach((el, i) => {
     el.classList.remove('correct-reveal', 'wrong-reveal');
-    if (i === correct) el.classList.add('correct-reveal');
-    else el.classList.add('wrong-reveal');
+    const oldTag = el.querySelector('.p-correct-tag');
+    if (oldTag) oldTag.remove();
+    if (i === correct) {
+      el.classList.add('correct-reveal');
+      // ① どれが正解か一目でわかるタグ
+      const tag = document.createElement('div');
+      tag.className = 'p-correct-tag';
+      tag.textContent = '✔ 正解';
+      el.appendChild(tag);
+    } else {
+      el.classList.add('wrong-reveal');
+    }
   });
 
   // 正答率バナー (正解者数 ÷ 参加者数)
@@ -530,9 +538,8 @@ async function revealP(q) {
     r.className = 'p-double';
     r.style.background = 'linear-gradient(135deg, #42a5f5, #7e57c2)';
     r.style.animation = 'none';
-    r.textContent = `📊 正答率 ${rate}% (${cc}/参加${pCount}人)`;
-    const pq = document.getElementById('p-question');
-    pq.insertBefore(r, pq.querySelector('.pq-card'));
+    r.textContent = `📊 正答率 ${rate}%`;
+    document.getElementById('pq-mid').appendChild(r); // ④ ヘッダー中央へ
   }
   playFanfare();
   fireConfetti();
@@ -610,22 +617,34 @@ async function runFinale(arr) {
 
   const startIdx = Math.min(19, n - 1);
   if (startIdx >= 3) {
-    // ④ 20〜11位は右列、10〜4位は左列。新しい順位が上に入り繰り上がっていく
+    // ② 最初から1〜20位の枠(左列=1〜10位/右列=11〜20位)を表示し、
+    //    20位から順に名前と得点が埋まっていく
+    const total = Math.min(20, n);
+    let leftRows = '', rightRows = '';
+    for (let r = 1; r <= total; r++) {
+      const rowHtml = `<div class="finale-row pending" id="fr-r${r}">
+        <span class="fr-pos">${r}位</span>
+        <span class="fr-name">— — —</span>
+        <span class="fr-score"></span>
+      </div>`;
+      if (r <= 10) leftRows += rowHtml; else rightRows += rowHtml;
+    }
     stage.innerHTML = `<div class="finale-sub">🏆 TOP 20</div>
       <div class="finale-cols">
-        <div class="finale-col" id="fl-left"></div>
-        <div class="finale-col" id="fl-right"></div>
+        <div class="finale-col" id="fl-left">${leftRows}</div>
+        <div class="finale-col" id="fl-right">${rightRows}</div>
       </div>`;
-    const left = stage.querySelector('#fl-left');
-    const right = stage.querySelector('#fl-right');
     for (let i = startIdx; i >= 3; i--) {
       if (!finaleRunning) return;
       const p = arr[i];
       if (!p) continue;
-      const row = document.createElement('div');
-      row.className = 'finale-row';
-      row.innerHTML = `<span class="fr-pos">${i + 1}位</span><span class="fr-name">${escapeHtml(p.name)}</span><span class="fr-score">${p.score}</span>`;
-      ((i + 1 >= 11) ? right : left).prepend(row);
+      const row = document.getElementById('fr-r' + (i + 1));
+      if (row) {
+        row.querySelector('.fr-name').textContent = p.name;
+        row.querySelector('.fr-score').textContent = p.score;
+        row.classList.remove('pending');
+        row.classList.add('filled');
+      }
       playDrum(i);
       await wait(750);
     }

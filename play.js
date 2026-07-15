@@ -1,5 +1,5 @@
-// 同期会クイズ v2.6 (2026-07-15) - play.js
-console.log('同期会クイズ v2.6 (2026-07-15) - play.js loaded');
+// 同期会クイズ v2.7.1 (2026-07-15) - play.js
+console.log('同期会クイズ v2.7.1 (2026-07-15) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -41,6 +41,7 @@ let myName = '';
 let currentQuiz = null;
 let lastState = null;
 let timerInterval = null;
+let timerDoneKey = null; // タイムアップ済みの問題キー (鐘の繰り返し防止)
 let countdownInterval = null;
 let mySelected = -1;
 let finaleRunning = false;
@@ -433,7 +434,8 @@ function handleStateChange(q) {
       mySelected = -1;
       showQuestion(q);
     } else {
-      if (!timerInterval) startTimer(q);
+      // ③ タイムアップ済みならポーリングで再起動しない (鐘が繰り返されるバグの修正)
+      if (!timerInterval && timerDoneKey !== stateKey) startTimer(q);
     }
   } else if (state === 'answer') {
     if (lastState !== stateKey) {
@@ -481,6 +483,7 @@ function showQuestion(q) {
   `).join('');
 
   document.getElementById('answered-status').classList.add('hidden');
+  timerDoneKey = null; // 新しい問題でリセット
 
   // 投票数表示の状態を初期化
   votesShown = false;
@@ -599,7 +602,8 @@ function startTimer(q) {
     if (remaining <= 0) {
       clearInterval(timerInterval);
       timerInterval = null;
-      playTimeUpBell(); // ② 終了を告げる鐘
+      timerDoneKey = 'question:' + (currentQuiz ? currentQuiz.current_idx : -1);
+      playTimeUpBell(); // 終了を告げる鐘 (1回のみ)
       if (!PREVIEW && mySelected < 0) {
         submitAnswer(-1);
       }
@@ -875,16 +879,29 @@ async function runFinale(arr) {
   // === 第2幕: 20位〜4位を下から順に ===
   const startIdx = Math.min(19, n - 1);
   if (startIdx >= 3) {
-    stage.innerHTML = '<div class="finale-sub">🏆 TOP 20</div><div class="finale-list" id="finale-list"></div>';
-    const listWrap = stage.querySelector('#finale-list');
+    // ② 最初から1〜20位の枠を表示し、20位から順に名前と得点が埋まっていく
+    const total = Math.min(20, n);
+    let frames = '';
+    for (let r = 1; r <= total; r++) {
+      frames += `<div class="finale-row pending" id="fr-r${r}">
+        <span class="fr-pos">${r}位</span>
+        <span class="fr-name">— — —</span>
+        <span class="fr-score"></span>
+      </div>`;
+    }
+    stage.innerHTML = '<div class="finale-sub">🏆 TOP 20</div><div class="finale-list" id="finale-list">' + frames + '</div>';
     for (let i = startIdx; i >= 3; i--) {
       if (!finaleRunning) return;
       const p = arr[i];
       if (!p) continue;
-      const row = document.createElement('div');
-      row.className = 'finale-row';
-      row.innerHTML = `<span class="fr-pos">${i + 1}位</span><span class="fr-name">${escapeHtml(p.name)}</span><span class="fr-score">${p.score}</span>`;
-      listWrap.prepend(row);
+      const row = document.getElementById('fr-r' + (i + 1));
+      if (row) {
+        row.querySelector('.fr-name').textContent = p.name;
+        row.querySelector('.fr-score').textContent = p.score;
+        row.classList.remove('pending');
+        row.classList.add('filled');
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
       playDrum(i);
       await wait(750);
     }
@@ -932,7 +949,7 @@ function showMyResult(rank, score, total) {
     <div class="mr-medal">${medal}</div>
     <div class="mr-label">あなたの最終成績</div>
     <div class="mr-rank">第 ${rank} 位</div>
-    <div class="mr-score">${score} 点 <small>/ ${total}人中</small></div>
+    <div class="mr-score">${score} 点</div>
     <div class="mr-hint">タップで小さく表示</div>`;
   d.addEventListener('click', () => d.classList.toggle('mini'));
   document.body.appendChild(d);
@@ -954,17 +971,25 @@ function bigReveal(stage, rank, p, medal) {
 
 function champion(stage, p) {
   stage.innerHTML = `
-    <div class="kusudama">
-      <div class="ku-half left"></div><div class="ku-half right"></div>
-      <div class="ku-ribbons">${'<span class="ribbon"></span>'.repeat(10)}</div>
-      <div class="ku-banner">🎊 Congratulations!! 🎊</div>
-    </div>
     <div class="champ">
       <div class="champ-crown">👑</div>
       <div class="champ-rank">優 勝</div>
       <div class="champ-name">${escapeHtml(p.name)}</div>
       <div class="champ-score">${p.score} pts</div>
     </div>`;
+  // くす玉はスクロール領域の外 (オーバーレイ直下) に置き、切り取られず必ず表示されるようにする
+  const ov = document.getElementById('finale-overlay');
+  if (ov) {
+    const oldK = ov.querySelector(':scope > .kusudama');
+    if (oldK) oldK.remove();
+    const k = document.createElement('div');
+    k.className = 'kusudama ku-top';
+    k.innerHTML = `
+      <div class="ku-half left"></div><div class="ku-half right"></div>
+      <div class="ku-ribbons">${'<span class="ribbon"></span>'.repeat(10)}</div>
+      <div class="ku-banner">🎊 Congratulations!! 🎊</div>`;
+    ov.appendChild(k);
+  }
   playCrash(0);
   playCelebrationFanfare();
   playCrash(1600);

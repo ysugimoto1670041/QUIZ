@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 同期会クイズ v2.6 (2026-07-15) -->
+<!-- 同期会クイズ v2.7.1 (2026-07-15) -->
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -570,6 +570,62 @@ body {
   align-items: start;
 }
 .finale-col { display: flex; flex-direction: column; gap: 1vh; }
+
+/* ==== v2.7.1 ==== */
+/* ④ ヘッダー中央のバナー枠 (ダブルスコア/正答率) — 選択肢の位置を動かさない */
+.pq-mid {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  gap: 1.2vw;
+  min-height: 6.4vh;
+  overflow: hidden;
+}
+.pq-mid .p-double {
+  margin: 0;
+  font-size: 2.6vh;
+  padding: 0.8vh 2vw;
+  white-space: nowrap;
+}
+/* ④ 出題画面: 各要素の高さを固定し、選択肢の一番下まで必ず表示 */
+#p-question { padding: 1.6vh 3vw 2vh; }
+.pq-header { margin-bottom: 1vh; }
+.p-timer-bar { margin-bottom: 1.4vh; }
+.pq-card {
+  flex: 0 0 auto;
+  max-height: 24vh;
+  overflow: hidden;
+  margin-bottom: 1.4vh;
+  padding: 1.8vh 2.5vw;
+}
+.pq-text { font-size: 4vh !important; }
+.pq-image { max-height: 20vh !important; }
+.p-choices { flex: 1 1 auto; min-height: 0; gap: 2.4vh 2vw; }
+.p-choice { min-height: 0; padding: 1vh 1.5vw; }
+.p-choice img { max-height: 13vh !important; }
+/* ⑤ ABCDバッジを大きく (後方の参加者にも見える) */
+.p-choice .pbadge {
+  width: 7.5vh !important; height: 7.5vh !important;
+  font-size: 4.4vh !important;
+  top: -2.6vh !important; left: -1.4vh !important;
+}
+/* ① 正解タグ (どれが正解か一目瞭然) */
+.p-correct-tag {
+  position: absolute;
+  top: -2.6vh; right: -0.8vw;
+  background: #2e7d32;
+  color: white;
+  font-weight: 900;
+  font-size: 3.2vh;
+  padding: 0.6vh 1.8vw;
+  border-radius: 999px;
+  box-shadow: 0 0.6vh 2vh rgba(0,0,0,0.35);
+  z-index: 5;
+  animation: popIn 0.4s var(--spring);
+}
+/* ② 固定枠 (ブランク→名前が埋まる) */
+.finale-row.pending { opacity: 0.4; }
+.finale-row.pending .fr-name { color: #bbb; letter-spacing: 0.3em; }
+.finale-row.filled { animation: popIn 0.45s var(--spring); opacity: 1; }
 </style>
 </head>
 <body>
@@ -614,6 +670,7 @@ body {
 <div id="p-question" class="pscreen hidden">
   <div class="pq-header">
     <div class="pq-num" id="pq-num">Q1/5</div>
+    <div class="pq-mid" id="pq-mid"></div>
     <div class="pq-answered">✋ 回答: <span id="pq-answered">0</span>人</div>
   </div>
   <div class="p-timer-bar"><div class="p-timer-fill" id="p-timer-fill"></div></div>

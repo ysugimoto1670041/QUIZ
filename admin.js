@@ -1,5 +1,5 @@
-// 同期会クイズ v2.7.1 (2026-07-15) - admin.js
-console.log('同期会クイズ v2.7.1 (2026-07-15) - admin.js loaded');
+// 同期会クイズ v2.8 (2026-07-15) - admin.js
+console.log('同期会クイズ v2.8 (2026-07-15) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -294,7 +294,6 @@ window.startQuiz = async function() {
   localStorage.removeItem('ltcb_quiz_finished_at');
   updateElapsed();
 
-  alert('問題を配信しました!\n参加者・プロジェクター画面が「READY GO!」に切り替わります。\n「▶ 第1問を開始」を押すと3・2・1のカウントダウンで第1問が始まります。');
 }
 
 window.resetQuiz = async function() {
@@ -450,6 +449,8 @@ async function refreshLive() {
     btn.textContent = (quiz.current_idx + 1 >= (quiz.questions || []).length) ? '🏁 最終成績発表へ' : '▶ 次の質問へ';
   } else if (quiz.state === 'ranking') btn.textContent = '🏆 ランキング表示中';
   else btn.textContent = '✓ 終了しました';
+  // ① クイズスタートが押されるまで「第1問を開始」は無効 (グレーアウト)
+  btn.disabled = (quiz.state === 'waiting');
 
   // 終了時に経過時間を固定
   if (quiz.state === 'finished') {
@@ -675,10 +676,10 @@ function setupPreviewTabs() {
       pvMode = b.dataset.mode;
       const isTest = pvMode === 'test';
       document.getElementById('preview-frame').src =
-        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=29';
+        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=30';
       // プロジェクターを連動切替 (テスト時は参加者画面に追従する連動テストモード)
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=29' + (isTest ? '&test=1&follow=1' : '');
+        'projector.html?embed=1&v=30' + (isTest ? '&test=1&follow=1' : '');
       setProjTabActive(isTest ? 'test' : 'live');
       if (!isTest) { testBoardRows = []; }
       updateQuestionBoard(currentLiveQuiz);
@@ -697,7 +698,7 @@ function setupPreviewTabs() {
       document.querySelectorAll('.proj-col .pj-tab').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=29' + (b.dataset.mode === 'test' ? '&test=1' : '');
+        'projector.html?embed=1&v=30' + (b.dataset.mode === 'test' ? '&test=1' : '');
     });
   });
   const pjReload = document.querySelector('.proj-col .pj-reload');

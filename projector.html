@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 同期会クイズ v2.7.1 (2026-07-15) -->
+<!-- 同期会クイズ v2.8 (2026-07-15) -->
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -626,6 +626,26 @@ body {
 .finale-row.pending { opacity: 0.4; }
 .finale-row.pending .fr-name { color: #bbb; letter-spacing: 0.3em; }
 .finale-row.filled { animation: popIn 0.45s var(--spring); opacity: 1; }
+
+/* ==== v2.8 ==== */
+/* ⑥ 優勝表示: 垂れ幕(Congratulations)の下に配置し、大きく */
+.champ { margin-top: 27vh !important; }
+.champ-crown { font-size: 12vh !important; }
+.champ-rank {
+  font-size: 9.5vh !important;
+  letter-spacing: 0.35em !important;
+  text-shadow: 0 0.6vh 2.4vh rgba(255,213,74,0.6);
+}
+.champ-name { font-size: 9vh !important; }
+.champ-score { font-size: 6vh !important; }
+/* バージョンバッジ (端末が最新コードか判別用) */
+.ver-badge {
+  position: fixed; bottom: 1vh; left: 1vw;
+  z-index: 40;
+  font-size: 1.6vh; font-weight: 700;
+  color: rgba(255,255,255,0.45);
+  pointer-events: none;
+}
 </style>
 </head>
 <body>
@@ -695,7 +715,8 @@ body {
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="supabase-config.js"></script>
-<script src="projector.js"></script>
+<div class="ver-badge">v2.8</div>
+<script src="supabase-config.js?v=30"></script>
+<script src="projector.js?v=30"></script>
 </body>
 </html>

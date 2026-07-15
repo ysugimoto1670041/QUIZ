@@ -1,5 +1,5 @@
-// 同期会クイズ v2.7.1 (2026-07-15) - projector.js
-console.log('同期会クイズ v2.7.1 (2026-07-15) - projector.js loaded');
+// 同期会クイズ v2.8 (2026-07-15) - projector.js
+console.log('同期会クイズ v2.8 (2026-07-15) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -62,6 +62,22 @@ function playGrandFanfare() {
 function playTick() { playTone(800, 0.05, 'square', 0.05); }
 function playCountBeep(final) { playTone(final ? 880 : 440, final ? 0.4 : 0.15, 'square', final ? 0.14 : 0.1); }
 function playDrum(i) { playTone(180 + (i % 3) * 30, 0.07, 'square', 0.06); }
+
+// 最初のタッチ/クリックでAudioContextを確実にアンロック
+function unlockAudio() {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  try {
+    ctx.resume();
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+  } catch (e) {}
+}
+document.addEventListener('touchend', unlockAudio, { once: true });
+document.addEventListener('click', unlockAudio, { once: true });
 
 // ==== v2.4 音響エンジン ====
 

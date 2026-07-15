@@ -1,5 +1,5 @@
-// 同期会クイズ v2.7.1 (2026-07-15) - play.js
-console.log('同期会クイズ v2.7.1 (2026-07-15) - play.js loaded');
+// 同期会クイズ v2.8 (2026-07-15) - play.js
+console.log('同期会クイズ v2.8 (2026-07-15) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -134,6 +134,22 @@ function playStart() {
   [400, 600, 800].forEach((f, i) => setTimeout(() => playTone(f, 0.15, 'square', 0.1), i * 100));
 }
 function playDrum(i) { playTone(180 + (i % 3) * 30, 0.07, 'square', 0.06); }
+
+// スマホでの無音対策: 最初のタッチ/クリックでAudioContextを確実にアンロック
+function unlockAudio() {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  try {
+    ctx.resume();
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+  } catch (e) {}
+}
+document.addEventListener('touchend', unlockAudio, { once: true });
+document.addEventListener('click', unlockAudio, { once: true });
 
 // ==== v2.4 音響エンジン ====
 
@@ -680,15 +696,20 @@ async function revealAnswer(q) {
   if (revealedRounds.has(idx)) return;
   revealedRounds.add(idx);
 
-  const { data: answers, error } = await sb.from('answers').select('*').eq('q_idx', idx);
-  if (error) console.error(error);
-  const ans = answers || [];
+  // ③ 通信エラーが起きても必ず結果表示まで到達するよう防御
+  let ans = [];
+  let pCount = 0;
+  try {
+    const { data: answers, error } = await sb.from('answers').select('*').eq('q_idx', idx);
+    if (error) console.error(error);
+    ans = answers || [];
+    const { data: allPlayers } = await sb.from('players').select('id');
+    pCount = (allPlayers || []).length;
+  } catch (e) { console.error('回答取得エラー:', e); }
   const allCorrect = ans.filter(a => a.choice === correct);
   const myAns = ans.find(a => a.player_id === myId);
   const myCorrect = myAns && myAns.choice === correct;
   // 正答率 = 正解者数 ÷ 参加者数 (無回答も「はずれ」扱い)
-  const { data: allPlayers } = await sb.from('players').select('id');
-  const pCount = (allPlayers || []).length;
   const rateStat = {
     total: pCount,
     correctCount: allCorrect.length,
@@ -708,9 +729,11 @@ async function revealAnswer(q) {
   showRevealOverlay(myCorrect, myPointsThisRound, isLast && myCorrect, rateStat);
 
   if (myCorrect && myPointsThisRound > 0) {
-    const { data: currentPlayer } = await sb.from('players').select('score').eq('id', myId).maybeSingle();
-    const newScore = (currentPlayer ? currentPlayer.score : 0) + myPointsThisRound;
-    await sb.from('players').update({ score: newScore }).eq('id', myId);
+    try {
+      const { data: currentPlayer } = await sb.from('players').select('score').eq('id', myId).maybeSingle();
+      const newScore = (currentPlayer ? currentPlayer.score : 0) + myPointsThisRound;
+      await sb.from('players').update({ score: newScore }).eq('id', myId);
+    } catch (e) { console.error('スコア更新エラー:', e); }
   }
 }
 

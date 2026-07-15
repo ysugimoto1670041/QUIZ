@@ -1,11 +1,16 @@
-// 同期会クイズ v2.4 (2026-07-14) - play.js
-console.log('同期会クイズ v2.4 (2026-07-14) - play.js loaded');
+// 同期会クイズ v2.5 (2026-07-15) - play.js
+console.log('同期会クイズ v2.5 (2026-07-15) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
 const TEST = _params.has('test');
 
-const COUNTDOWN_MS = 5500; // 配信ディレイ吸収2.5秒 + 3・2・1カウント3秒
+const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
+const COUNTDOWN_MS_LAST = 6500; // 最終問題: 予告表示3秒 + 3・2・1
+
+function isLastQuestion(q) {
+  return q && q.current_idx === ((q.questions || []).length - 1);
+}
 
 // ========== Supabase初期化 ==========
 let sb = null;
@@ -58,7 +63,7 @@ function broadcastTestState() {
 }
 
 function effectiveStart(q) {
-  return (q.question_started_at || 0) + COUNTDOWN_MS;
+  return (q.question_started_at || 0) + (isLastQuestion(q) ? COUNTDOWN_MS_LAST : COUNTDOWN_MS);
 }
 
 // ========== 効果音 ==========
@@ -153,20 +158,24 @@ function playCrash(delay = 0) {
   }, delay);
 }
 
-// ② 時間切れの鐘「カンカラカーン」
+// ② 時間切れの鐘「カンカンカーン」(徐々に大きく鳴り響くクレッシェンド)
 function playTimeUpBell() {
   const strike = (t, f, v) => setTimeout(() => {
     playTone(f, 0.5, 'triangle', v);
     playTone(f * 2.76, 0.35, 'sine', v * 0.55); // 金属的な倍音
     playTone(f * 5.4, 0.18, 'sine', v * 0.3);
   }, t);
-  strike(0, 1318, 0.18);
-  strike(170, 1318, 0.17);
-  strike(340, 1318, 0.16);
+  // カン…カン…カーン と音量が段階的に増していく
+  strike(0,   1318, 0.06);
+  strike(220, 1318, 0.09);
+  strike(430, 1318, 0.13);
+  strike(620, 1318, 0.17);
+  // 最後にひときわ大きく長く鳴り響く
   setTimeout(() => {
-    playTone(880, 1.3, 'triangle', 0.15);
-    playTone(880 * 2.76, 0.9, 'sine', 0.07);
-  }, 540);
+    playTone(1046, 1.8, 'triangle', 0.2);
+    playTone(1046 * 2.76, 1.2, 'sine', 0.1);
+    playTone(523, 1.6, 'triangle', 0.1);
+  }, 820);
 }
 
 // ③ セレブレーションファンファーレ (最終成績発表用・響き渡る豪華版)
@@ -236,7 +245,7 @@ function playUrgeTick(frac) {
   }
 }
 
-// ========== 投票数ライブ表示 (残り10秒〜) ==========
+// ========== 投票数ライブ表示 (残り5秒〜) ==========
 let votesShown = false;
 let lastVoteFetch = 0;
 let testVotes = [0, 0, 0, 0];
@@ -406,12 +415,12 @@ function handleStateChange(q) {
   if (state !== 'finished') removeFinale();
 
   if (state === 'waiting') {
-    startWaitBgm(); // ④ 待機中BGM
+    stopWaitBgm(); // ① クイズスタート前は無音
     toggleReadyGo(false);
     showScreen('waiting');
   } else if (state === 'ready') {
-    stopWaitBgm();
     if (lastState !== stateKey) playStart();
+    startWaitBgm(); // READY GO後〜第1問までワクワクBGM
     toggleReadyGo(true);
     showScreen('waiting');
   } else if (state === 'question') {
@@ -429,10 +438,12 @@ function handleStateChange(q) {
       showScreen('question');
     }
   } else if (state === 'ranking') {
+    stopWaitBgm();
     if (lastState !== stateKey) {
       showRankingScreen();
     }
   } else if (state === 'finished') {
+    stopWaitBgm();
     if (lastState !== stateKey) showResult();
   }
   lastState = stateKey;
@@ -494,14 +505,14 @@ function showQuestion(q) {
     showCountdown(effStart, () => {
       choicesEl.classList.remove('locked');
       startTimer(q);
-    });
+    }, isLastQuestion(q));
   } else {
     choicesEl.classList.remove('locked');
     startTimer(q);
   }
 }
 
-function showCountdown(effStart, onDone) {
+function showCountdown(effStart, onDone, isLast) {
   clearInterval(countdownInterval);
   const existing = document.getElementById('countdown-overlay');
   if (existing) existing.remove();
@@ -527,6 +538,8 @@ function showCountdown(effStart, onDone) {
       if (sec <= 3) {
         overlay.innerHTML = `<div class="countdown-num">${sec}</div>`;
         playCountBeep(false);
+      } else if (isLast) {
+        overlay.innerHTML = `<div class="countdown-final">🔥 最後の問題です。<br>この得点は倍になります!</div>`;
       } else {
         overlay.innerHTML = `<div class="countdown-ready">まもなく出題!</div>`;
       }
@@ -566,8 +579,8 @@ function startTimer(q) {
         playUrgeTick(frac);
       }
     }
-    // 残り10秒: 各選択肢の投票数を表示し、以降ライブでカウントアップ
-    if (remaining > 0 && remaining <= 10000 && currentQuiz && currentQuiz.state === 'question') {
+    // 残り5秒: 各選択肢の投票数を表示し、以降ライブでカウントアップ (迷っている人の決断を促す)
+    if (remaining > 0 && remaining <= 5000 && currentQuiz && currentQuiz.state === 'question') {
       if (!votesShown) {
         votesShown = true;
         showVoteBadges();
@@ -1066,7 +1079,7 @@ function setupTestMode() {
   const bar = document.createElement('div');
   bar.id = 'test-bar';
   bar.innerHTML = `
-    <button id="test-next" onclick="testNext()">▶ 第1問</button>
+    <button id="test-next" onclick="testNext()">🚀 READY GO</button>
     <button class="ghost" onclick="testRanking()">🏆</button>
     <button class="ghost" onclick="testReset()">↺</button>
   `;
@@ -1077,6 +1090,8 @@ window.testNext = function() {
   getAudioCtx();
   const q = currentQuiz;
   if (q.state === 'waiting') {
+    q.state = 'ready';
+  } else if (q.state === 'ready') {
     q.state = 'question'; q.current_idx = 0; q.question_started_at = Date.now();
   } else if (q.state === 'question') {
     q.state = 'answer';
@@ -1090,7 +1105,7 @@ window.testNext = function() {
     testReset();
     return;
   } else if (q.state === 'ranking') {
-    q.state = (q.current_idx >= 0) ? 'answer' : 'waiting';
+    q.state = (q.current_idx >= 0) ? 'answer' : 'ready';
     handleTestState();
     broadcastTestState();
     return;
@@ -1102,12 +1117,19 @@ window.testNext = function() {
 function handleTestState() {
   const q = currentQuiz;
   const btn = document.getElementById('test-next');
-  if (q.state !== 'waiting') stopWaitBgm();
   if (q.state === 'waiting') {
+    stopWaitBgm();
+    toggleReadyGo(false);
+    showScreen('waiting');
+    btn.textContent = '🚀 READY GO';
+  } else if (q.state === 'ready') {
+    playStart();
     startWaitBgm();
+    toggleReadyGo(true);
     showScreen('waiting');
     btn.textContent = '▶ 第1問';
   } else if (q.state === 'question') {
+    stopWaitBgm();
     mySelected = -1;
     testChoice = -1;
     testElapsed = 0;
@@ -1195,9 +1217,10 @@ window.testReset = function() {
   showScreen('waiting');
   if (bcTest) bcTest.postMessage({ type: 'reset' });
   broadcastTestState();
-  startWaitBgm();
+  stopWaitBgm();
+  toggleReadyGo(false);
   const btn = document.getElementById('test-next');
-  if (btn) btn.textContent = '▶ 第1問';
+  if (btn) btn.textContent = '🚀 READY GO';
 }
 
 // ========== 起動 ==========

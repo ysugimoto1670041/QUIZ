@@ -1,8 +1,13 @@
-// 同期会クイズ v2.4 (2026-07-14) - projector.js
-console.log('同期会クイズ v2.4 (2026-07-14) - projector.js loaded');
+// 同期会クイズ v2.5 (2026-07-15) - projector.js
+console.log('同期会クイズ v2.5 (2026-07-15) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
-const COUNTDOWN_MS = 5500; // 配信ディレイ吸収2.5秒 + 3・2・1カウント3秒
+const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
+const COUNTDOWN_MS_LAST = 6500; // 最終問題: 予告表示3秒 + 3・2・1
+
+function isLastQuestion(q) {
+  return q && q.current_idx === ((q.questions || []).length - 1);
+}
 // ?embed=1 : 管理画面内のプレビュー用 (無音・自動接続・全画面化なし)
 const EMBED = new URLSearchParams(location.search).has('embed');
 // ?test=1 : テストモード (DB進行と切り離してローカル再生。実機プロジェクターの映りを検証できる)
@@ -81,20 +86,24 @@ function playCrash(delay = 0) {
   }, delay);
 }
 
-// ② 時間切れの鐘「カンカラカーン」
+// ② 時間切れの鐘「カンカンカーン」(徐々に大きく鳴り響くクレッシェンド)
 function playTimeUpBell() {
   const strike = (t, f, v) => setTimeout(() => {
     playTone(f, 0.5, 'triangle', v);
     playTone(f * 2.76, 0.35, 'sine', v * 0.55); // 金属的な倍音
     playTone(f * 5.4, 0.18, 'sine', v * 0.3);
   }, t);
-  strike(0, 1318, 0.18);
-  strike(170, 1318, 0.17);
-  strike(340, 1318, 0.16);
+  // カン…カン…カーン と音量が段階的に増していく
+  strike(0,   1318, 0.06);
+  strike(220, 1318, 0.09);
+  strike(430, 1318, 0.13);
+  strike(620, 1318, 0.17);
+  // 最後にひときわ大きく長く鳴り響く
   setTimeout(() => {
-    playTone(880, 1.3, 'triangle', 0.15);
-    playTone(880 * 2.76, 0.9, 'sine', 0.07);
-  }, 540);
+    playTone(1046, 1.8, 'triangle', 0.2);
+    playTone(1046 * 2.76, 1.2, 'sine', 0.1);
+    playTone(523, 1.6, 'triangle', 0.1);
+  }, 820);
 }
 
 // ③ セレブレーションファンファーレ (最終成績発表用・響き渡る豪華版)
@@ -163,7 +172,7 @@ function playUrgeTick(frac) {
   }
 }
 
-// ========== 投票数ライブ表示 (残り10秒〜) ==========
+// ========== 投票数ライブ表示 (残り5秒〜) ==========
 let pVotesShown = false;
 let pLastVoteFetch = 0;
 
@@ -302,12 +311,12 @@ function handleState(q) {
   if (q.state !== 'finished') removeFinale();
 
   if (q.state === 'waiting') {
-    startWaitBgm(); // ④ 待機中BGM
+    stopWaitBgm(); // ① クイズスタート前は無音
     toggleReadyP(false);
     showP('waiting');
   } else if (q.state === 'ready') {
-    stopWaitBgm();
     if (lastKey !== key) playStart();
+    startWaitBgm(); // READY GO後〜第1問までワクワクBGM
     toggleReadyP(true);
     showP('waiting');
   } else if (q.state === 'question') {
@@ -316,8 +325,10 @@ function handleState(q) {
   } else if (q.state === 'answer') {
     if (lastKey !== key) revealP(q);
   } else if (q.state === 'ranking') {
+    stopWaitBgm();
     if (lastKey !== key) showRankingP();
   } else if (q.state === 'finished') {
+    stopWaitBgm();
     if (lastKey !== key) showFinishedP();
   }
   lastKey = key;
@@ -331,7 +342,7 @@ function toggleReadyP(on) {
 }
 
 function effectiveStart(q) {
-  return (q.question_started_at || 0) + COUNTDOWN_MS;
+  return (q.question_started_at || 0) + (isLastQuestion(q) ? COUNTDOWN_MS_LAST : COUNTDOWN_MS);
 }
 
 // ========== 出題表示 ==========
@@ -381,13 +392,13 @@ function showQuestionP(q) {
 
   const effStart = effectiveStart(q);
   if (Date.now() < effStart) {
-    showCountdownP(effStart, () => startTimerP(q));
+    showCountdownP(effStart, () => startTimerP(q), isLastQuestion(q));
   } else {
     startTimerP(q);
   }
 }
 
-function showCountdownP(effStart, onDone) {
+function showCountdownP(effStart, onDone, isLast) {
   clearInterval(countInt);
   const existing = document.getElementById('p-countdown');
   if (existing) existing.remove();
@@ -413,6 +424,8 @@ function showCountdownP(effStart, onDone) {
       if (sec <= 3) {
         overlay.innerHTML = `<div class="p-count-num">${sec}</div>`;
         playCountBeep(false);
+      } else if (isLast) {
+        overlay.innerHTML = `<div class="countdown-final">🔥 最後の問題です。<br>この得点は倍になります!</div>`;
       } else {
         overlay.innerHTML = `<div class="countdown-ready">まもなく出題!</div>`;
       }
@@ -444,8 +457,8 @@ function startTimerP(q) {
         playUrgeTick(frac);
       }
     }
-    // 残り10秒: 投票数を表示してライブ更新
-    if (remaining > 0 && remaining <= 10000 && quiz && quiz.state === 'question') {
+    // 残り5秒: 投票数を表示してライブ更新 (迷っている人の決断を促す)
+    if (remaining > 0 && remaining <= 5000 && quiz && quiz.state === 'question') {
       if (!pVotesShown) {
         pVotesShown = true;
         showVoteBadgesP();

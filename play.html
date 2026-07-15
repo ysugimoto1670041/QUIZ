@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 同期会クイズ v2.4 (2026-07-14) -->
+<!-- 同期会クイズ v2.5 (2026-07-15) -->
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -988,6 +988,18 @@ body.preview .answered-status { bottom: 78px; } /* テストバーと重なら�
 #my-result.mini .mr-rank { font-size: 20px; }
 #my-result.mini .mr-score { font-size: 13px; }
 #my-result.mini .mr-label, #my-result.mini .mr-hint { display: none; }
+
+/* ③ 最終問題の予告 */
+.countdown-final {
+  font-weight: 900;
+  font-size: clamp(20px, 5.6vw, 32px);
+  line-height: 1.6;
+  text-align: center;
+  color: var(--gold);
+  text-shadow: 0 4px 24px rgba(255,150,0,0.8);
+  animation: readyPulse 0.8s ease-in-out infinite;
+  padding: 0 16px;
+}
 </style>
 </head>
 <body>

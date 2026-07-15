@@ -1,5 +1,5 @@
-// 同期会クイズ v2.9 (2026-07-15) - play.js
-console.log('同期会クイズ v2.9 (2026-07-15) - play.js loaded');
+// 同期会クイズ v2.9.1 (2026-07-16) - play.js
+console.log('同期会クイズ v2.9.1 (2026-07-16) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -71,6 +71,7 @@ function effectiveStart(q) {
 // ========== 効果音 ==========
 let audioCtx = null;
 function getAudioCtx() {
+  if (audioCtx && audioCtx.state === 'closed') audioCtx = null;
   if (!audioCtx) {
     try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
     catch (e) {}

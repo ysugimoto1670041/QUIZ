@@ -1,5 +1,5 @@
-// 同期会クイズ v2.9 (2026-07-15) - projector.js
-console.log('同期会クイズ v2.9 (2026-07-15) - projector.js loaded');
+// 同期会クイズ v2.9.1 (2026-07-16) - projector.js
+console.log('同期会クイズ v2.9.1 (2026-07-16) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -28,11 +28,47 @@ let finaleRunning = false;
 // ========== 効果音 ==========
 let audioCtx = null;
 function getAudioCtx() {
+  // HDMI接続やディスプレイ切替でコンテキストが閉じられた場合は作り直す
+  if (audioCtx && audioCtx.state === 'closed') audioCtx = null;
   if (!audioCtx) {
     try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
     catch (e) {}
   }
   return audioCtx;
+}
+
+// ①② 音声エンジンの生存監視: suspend/interrupted状態を自動復旧
+//    (HDMIの音声出力切替・ウィンドウのフォーカス喪失などで途中から無音になる問題への対策)
+let audioWatchdogStarted = false;
+function startAudioWatchdog() {
+  if (audioWatchdogStarted) return;
+  audioWatchdogStarted = true;
+  setInterval(() => {
+    if (!audioCtx) return;
+    if (audioCtx.state === 'closed') { audioCtx = null; return; }
+    if (audioCtx.state !== 'running') {
+      try { audioCtx.resume(); } catch (e) {}
+      setTimeout(() => {
+        if (audioCtx && audioCtx.state !== 'running' && !EMBED) showAudioHint();
+      }, 1500);
+    } else {
+      hideAudioHint();
+    }
+  }, 2000);
+}
+
+function showAudioHint() {
+  if (document.getElementById('audio-hint')) return;
+  const b = document.createElement('button');
+  b.id = 'audio-hint';
+  b.textContent = '🔊 タップで音声を再開';
+  b.style.cssText = 'position:fixed;bottom:6vh;left:50%;transform:translateX(-50%);z-index:2500;font-family:inherit;font-weight:900;font-size:2.4vh;padding:1.4vh 3vw;border:none;border-radius:999px;background:#ff9800;color:#fff;box-shadow:0 1vh 3vh rgba(0,0,0,.4);cursor:pointer;';
+  b.onclick = () => { try { getAudioCtx().resume(); } catch (e) {} hideAudioHint(); };
+  document.body.appendChild(b);
+}
+function hideAudioHint() {
+  const b = document.getElementById('audio-hint');
+  if (b) b.remove();
 }
 function playTone(freq, duration, type = 'sine', volume = 0.2) {
   if (EMBED && !TESTP) return; // 埋め込みライブプレビューは無音 (テストは音の確認も可能)
@@ -361,8 +397,13 @@ function handleState(q) {
     toggleReadyP(false);
     showP('waiting');
   } else if (q.state === 'ready') {
-    if (lastKey !== key) playStart();
-    startWaitBgm(); // READY GO後〜第1問までワクワクBGM
+    if (lastKey !== key) {
+      playStart();
+      // ④ チャイムと重ならないよう、BGMは1.5秒後に開始
+      setTimeout(() => { if (quiz && quiz.state === 'ready') startWaitBgm(); }, 1500);
+    } else {
+      startWaitBgm();
+    }
     toggleReadyP(true);
     showP('waiting');
   } else if (q.state === 'question') {
@@ -968,6 +1009,34 @@ window.pTestReset = function() {
   updateTestBtnP();
 }
 
+// ④ プロジェクター画面が複数開かれていないか監視 (音が二重になる原因)
+function showDupWarn() {
+  if (document.getElementById('dup-warn')) return;
+  const d = document.createElement('div');
+  d.id = 'dup-warn';
+  d.textContent = '⚠ プロジェクター画面が複数開いています。音が二重になるため、他のタブ/ウィンドウを閉じてください';
+  d.style.cssText = 'position:fixed;top:1.5vh;left:50%;transform:translateX(-50%);z-index:2500;font-weight:900;font-size:2vh;padding:1vh 2.5vw;border-radius:999px;background:#c62828;color:#fff;box-shadow:0 1vh 3vh rgba(0,0,0,.4);max-width:90vw;text-align:center;';
+  document.body.appendChild(d);
+  setTimeout(() => { const x = document.getElementById('dup-warn'); if (x) x.remove(); }, 12000);
+}
+if (!EMBED && 'BroadcastChannel' in window) {
+  try {
+    const dupBc = new BroadcastChannel('ltcb-proj-live');
+    const myTag = Math.random().toString(36).slice(2);
+    dupBc.onmessage = (ev) => {
+      const m = ev.data || {};
+      if (m.tag === myTag) return;
+      if (m.type === 'hello') {
+        dupBc.postMessage({ type: 'here', tag: myTag });
+        showDupWarn();
+      } else if (m.type === 'here') {
+        showDupWarn();
+      }
+    };
+    dupBc.postMessage({ type: 'hello', tag: myTag });
+  } catch (e) {}
+}
+
 // ========== QRコード ==========
 function renderQR() {
   const url = location.href.replace(/\/[^\/]*$/, '/play.html');
@@ -984,6 +1053,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (EMBED) {
     // 管理画面内プレビュー: クリック不要で即開始 (無音)
     document.getElementById('start-overlay').remove();
+    if (TESTP) startAudioWatchdog();
     if (TESTP && FOLLOW) setupFollowP();
     else if (TESTP) setupTestP();
     else connect();
@@ -999,6 +1069,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('start-overlay').addEventListener('click', async () => {
     document.getElementById('start-overlay').remove();
     getAudioCtx();
+    startAudioWatchdog();
     playStart();
     try { await document.documentElement.requestFullscreen(); } catch (e) {}
     if (TESTP && FOLLOW) setupFollowP();

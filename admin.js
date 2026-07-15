@@ -1,5 +1,5 @@
-// 同期会クイズ v2.9 (2026-07-15) - admin.js
-console.log('同期会クイズ v2.9 (2026-07-15) - admin.js loaded');
+// 同期会クイズ v2.9.1 (2026-07-16) - admin.js
+console.log('同期会クイズ v2.9.1 (2026-07-16) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -370,7 +370,6 @@ window.backToStart = async function() {
 }
 
 window.endQuiz = async function() {
-  if (!confirm('クイズを終了して「最終成績発表」を開始します。\n全参加者の画面で盛大な発表演出が始まります。よろしいですか?')) return;
   await upsertQuiz({ state: 'finished' });
 }
 
@@ -425,7 +424,6 @@ window.nextStep = async function() {
     await upsertQuiz({ state: 'answer' });
   } else if (state === 'answer') {
     if (idx + 1 >= total) {
-      if (!confirm('最後の問題です。「最終成績発表」を開始しますか?')) return;
       await upsertQuiz({ state: 'finished' });
     } else {
       await upsertQuiz({
@@ -725,10 +723,10 @@ function setupPreviewTabs() {
       pvMode = b.dataset.mode;
       const isTest = pvMode === 'test';
       document.getElementById('preview-frame').src =
-        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=32';
+        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=33';
       // プロジェクターを連動切替 (テスト時は参加者画面に追従する連動テストモード)
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=32' + (isTest ? '&test=1&follow=1' : '');
+        'projector.html?embed=1&v=33' + (isTest ? '&test=1&follow=1' : '');
       setProjTabActive(isTest ? 'test' : 'live');
       if (!isTest) { testBoardRows = []; }
       updateQuestionBoard(currentLiveQuiz);
@@ -747,7 +745,7 @@ function setupPreviewTabs() {
       document.querySelectorAll('.proj-col .pj-tab').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=32' + (b.dataset.mode === 'test' ? '&test=1' : '');
+        'projector.html?embed=1&v=33' + (b.dataset.mode === 'test' ? '&test=1' : '');
     });
   });
   const pjReload = document.querySelector('.proj-col .pj-reload');

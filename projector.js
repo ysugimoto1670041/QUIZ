@@ -1,5 +1,5 @@
-// 同期会クイズ v2.5 (2026-07-15) - projector.js
-console.log('同期会クイズ v2.5 (2026-07-15) - projector.js loaded');
+// 同期会クイズ v2.6 (2026-07-15) - projector.js
+console.log('同期会クイズ v2.6 (2026-07-15) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -14,6 +14,8 @@ const EMBED = new URLSearchParams(location.search).has('embed');
 const TESTP = new URLSearchParams(location.search).has('test');
 // ?follow=1 : 参加者画面のテストモードに同期して動く「連動テスト」
 const FOLLOW = new URLSearchParams(location.search).has('follow');
+let followRanking = null; // 参加者画面から受信した途中ランキング
+let followFinal = null;   // 参加者画面から受信した最終結果
 let tVotes = [0, 0, 0, 0];
 
 let sb = null;
@@ -188,11 +190,25 @@ function showVoteBadgesP() {
   });
 }
 
+function applyVotesToBadges() {
+  document.getElementById('pq-answered').textContent = tVotes.reduce((a, b) => a + b, 0);
+  document.querySelectorAll('#p-choices .p-vote').forEach(el => {
+    const i = parseInt(el.dataset.vc);
+    const t = (tVotes[i] || 0) + '票';
+    if (el.textContent !== t) {
+      el.textContent = t;
+      el.classList.remove('bump');
+      void el.offsetWidth;
+      el.classList.add('bump');
+    }
+  });
+}
+
 async function refreshVoteCountsP() {
   if (!quiz || quiz.current_idx < 0) return;
   let counts = [0, 0, 0, 0];
   if (TESTP) {
-    tVotes[Math.floor(Math.random() * 4)]++;
+    if (!FOLLOW) tVotes[Math.floor(Math.random() * 4)]++; // 連動時は参加者画面の票をそのまま使用
     counts = tVotes.slice();
     document.getElementById('pq-answered').textContent = tVotes.reduce((a, b) => a + b, 0);
   } else {
@@ -536,7 +552,7 @@ function dummyPlayersP(n) {
 async function showRankingP() {
   let arr;
   if (TESTP) {
-    arr = dummyPlayersP(22).slice(0, 20);
+    arr = ((FOLLOW && followRanking) ? followRanking : dummyPlayersP(22)).slice(0, 20);
   } else {
     const { data } = await sb.from('players').select('*').order('score', { ascending: false }).limit(20);
     arr = (data || []).slice(0, 20);
@@ -559,7 +575,7 @@ async function showRankingP() {
 // ========== 最終成績発表 ==========
 async function showFinishedP() {
   if (TESTP) {
-    runFinale(dummyPlayersP(22));
+    runFinale((FOLLOW && followFinal) ? followFinal : dummyPlayersP(22));
     return;
   }
   const { data } = await sb.from('players').select('*').order('score', { ascending: false });
@@ -594,8 +610,14 @@ async function runFinale(arr) {
 
   const startIdx = Math.min(19, n - 1);
   if (startIdx >= 3) {
-    stage.innerHTML = '<div class="finale-sub">🏆 TOP 20</div><div class="finale-list" id="finale-list"></div>';
-    const listWrap = stage.querySelector('#finale-list');
+    // ④ 20〜11位は右列、10〜4位は左列。新しい順位が上に入り繰り上がっていく
+    stage.innerHTML = `<div class="finale-sub">🏆 TOP 20</div>
+      <div class="finale-cols">
+        <div class="finale-col" id="fl-left"></div>
+        <div class="finale-col" id="fl-right"></div>
+      </div>`;
+    const left = stage.querySelector('#fl-left');
+    const right = stage.querySelector('#fl-right');
     for (let i = startIdx; i >= 3; i--) {
       if (!finaleRunning) return;
       const p = arr[i];
@@ -603,7 +625,7 @@ async function runFinale(arr) {
       const row = document.createElement('div');
       row.className = 'finale-row';
       row.innerHTML = `<span class="fr-pos">${i + 1}位</span><span class="fr-name">${escapeHtml(p.name)}</span><span class="fr-score">${p.score}</span>`;
-      listWrap.prepend(row);
+      ((i + 1 >= 11) ? right : left).prepend(row);
       playDrum(i);
       await wait(750);
     }
@@ -749,6 +771,7 @@ async function setupFollowP() {
   badge.className = 'p-test-badge';
   badge.textContent = '🧪 連動テスト (参加者画面と同期)';
   document.body.appendChild(badge);
+  document.getElementById('p-count').textContent = '22';
 
   if ('BroadcastChannel' in window) {
     const bc = new BroadcastChannel('ltcb-test-sync');
@@ -756,14 +779,25 @@ async function setupFollowP() {
       const m = ev.data || {};
       if (m.type === 'reset') {
         tVotes = [0, 0, 0, 0];
+        followRanking = null;
+        followFinal = null;
         removeFinale();
         quiz.state = 'waiting'; quiz.current_idx = -1; quiz.question_started_at = 0;
         lastKey = null;
         handleState(quiz);
         return;
       }
+      if (m.type === 'votes') {
+        // 参加者画面と同じ票数に同期
+        tVotes = (m.votes || [0,0,0,0]).slice();
+        applyVotesToBadges();
+        return;
+      }
+      if (m.type === 'ranking') { followRanking = m.players || null; return; }
+      if (m.type === 'final')   { followFinal = m.players || null; return; }
       if (m.type !== 'state') return;
       if (m.state === 'question' && quiz.state !== 'question') tVotes = [0, 0, 0, 0];
+      if (Array.isArray(m.votes)) tVotes = m.votes.slice();
       quiz.state = m.state;
       quiz.current_idx = m.current_idx;
       quiz.question_started_at = m.question_started_at;
@@ -794,6 +828,8 @@ async function setupTestP() {
   badge.className = 'p-test-badge';
   badge.textContent = '🧪 テストモード';
   document.body.appendChild(badge);
+
+  document.getElementById('p-count').textContent = '22';
 
   const bar = document.createElement('div');
   bar.id = 'p-test-bar';

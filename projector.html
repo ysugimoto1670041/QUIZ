@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 同期会クイズ v2.5 (2026-07-15) -->
+<!-- 同期会クイズ v2.6 (2026-07-15) -->
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -560,6 +560,16 @@ body {
   text-shadow: 0 0.6vh 3.6vh rgba(255,150,0,0.8);
   animation: readyPulseP 0.8s ease-in-out infinite;
 }
+
+/* ==== v2.6 ==== */
+/* ④ 最終発表: 左列=10〜4位 / 右列=20〜11位 (上に繰り上がり) */
+.finale-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1vh 2vw;
+  align-items: start;
+}
+.finale-col { display: flex; flex-direction: column; gap: 1vh; }
 </style>
 </head>
 <body>

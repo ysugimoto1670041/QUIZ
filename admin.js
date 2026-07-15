@@ -1,5 +1,5 @@
-// 同期会クイズ v2.5 (2026-07-15) - admin.js
-console.log('同期会クイズ v2.5 (2026-07-15) - admin.js loaded');
+// 同期会クイズ v2.6 (2026-07-15) - admin.js
+console.log('同期会クイズ v2.6 (2026-07-15) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -497,7 +497,6 @@ function renderTestBoard() {
     <span class="qb-q">第${r.idx + 1}問</span>
     <span class="qb-t">⏱ 平均 ${r.avgT.toFixed(1)}秒</span>
     <span class="qb-p">🎯 正解率 ${r.rate}%</span>
-    <span class="qb-note">🧪</span>
   </div>`).join('');
 }
 
@@ -676,10 +675,10 @@ function setupPreviewTabs() {
       pvMode = b.dataset.mode;
       const isTest = pvMode === 'test';
       document.getElementById('preview-frame').src =
-        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=26';
+        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=27';
       // プロジェクターを連動切替 (テスト時は参加者画面に追従する連動テストモード)
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=26' + (isTest ? '&test=1&follow=1' : '');
+        'projector.html?embed=1&v=27' + (isTest ? '&test=1&follow=1' : '');
       setProjTabActive(isTest ? 'test' : 'live');
       if (!isTest) { testBoardRows = []; }
       updateQuestionBoard(currentLiveQuiz);
@@ -698,7 +697,7 @@ function setupPreviewTabs() {
       document.querySelectorAll('.proj-col .pj-tab').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=26' + (b.dataset.mode === 'test' ? '&test=1' : '');
+        'projector.html?embed=1&v=27' + (b.dataset.mode === 'test' ? '&test=1' : '');
     });
   });
   const pjReload = document.querySelector('.proj-col .pj-reload');

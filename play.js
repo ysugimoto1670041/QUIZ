@@ -1,5 +1,5 @@
-// 同期会クイズ v2.5 (2026-07-15) - play.js
-console.log('同期会クイズ v2.5 (2026-07-15) - play.js loaded');
+// 同期会クイズ v2.6 (2026-07-15) - play.js
+console.log('同期会クイズ v2.6 (2026-07-15) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -58,7 +58,8 @@ function broadcastTestState() {
     state: currentQuiz.state,
     current_idx: currentQuiz.current_idx,
     question_started_at: currentQuiz.question_started_at,
-    time_limit: currentQuiz.time_limit
+    time_limit: currentQuiz.time_limit,
+    votes: testVotes.slice()
   });
 }
 
@@ -269,6 +270,7 @@ async function refreshVoteCounts() {
     // テストモード: 投票が増えていく様子を疑似再現
     testVotes[Math.floor(Math.random() * 4)]++;
     counts = testVotes.slice();
+    if (bcTest) bcTest.postMessage({ type: 'votes', votes: testVotes.slice() });
   } else {
     const { data } = await sb.from('answers').select('choice').eq('q_idx', currentQuiz.current_idx);
     (data || []).forEach(a => { if (a.choice >= 0 && a.choice < 4) counts[a.choice]++; });
@@ -414,6 +416,8 @@ function handleStateChange(q) {
 
   if (state !== 'finished') removeFinale();
 
+  if (state !== 'question' && state !== 'answer') clearRevealPill();
+
   if (state === 'waiting') {
     stopWaitBgm(); // ① クイズスタート前は無音
     toggleReadyGo(false);
@@ -488,6 +492,7 @@ function showQuestion(q) {
   if (oldBanner) oldBanner.remove();
   const oldRate = document.getElementById('rate-banner');
   if (oldRate) oldRate.remove();
+  clearRevealPill();
   if (idx === q.questions.length - 1) {
     const b = document.createElement('div');
     b.id = 'double-banner';
@@ -628,6 +633,7 @@ async function submitAnswer(i) {
     testChoice = i;
     testElapsed = elapsedMs;
     if (i >= 0) testVotes[i]++;
+    if (bcTest) bcTest.postMessage({ type: 'votes', votes: testVotes.slice() });
     return;
   }
 
@@ -695,7 +701,6 @@ async function revealAnswer(q) {
     if (isLast) myPointsThisRound *= 2; // 最終問題はダブルスコア
   }
 
-  showRateBanner(rateStat); // 次の質問まで表示し続ける
   showRevealOverlay(myCorrect, myPointsThisRound, isLast && myCorrect, rateStat);
 
   if (myCorrect && myPointsThisRound > 0) {
@@ -742,20 +747,24 @@ function showRevealOverlay(correct, points, isDouble, rateStat) {
     playWrong();
   }
 
+  // ⑤ 2.2秒後に消さず、上部のコンパクト表示に変形して次の問題まで残す
   setTimeout(() => {
-    overlay.style.transition = 'opacity 0.4s';
-    overlay.style.opacity = '0';
-    setTimeout(() => overlay.remove(), 400);
+    overlay.classList.add('stay');
   }, 2200);
 }
 
+function clearRevealPill() {
+  const ro = document.getElementById('reveal-overlay');
+  if (ro) ro.remove();
+}
+
 // ========== 途中ランキング表示 (TOP20を下位から発表) ==========
-async function showRankingScreen() {
+async function showRankingScreen(preArr) {
   clearInterval(timerInterval); timerInterval = null;
 
   let arr;
   if (TEST) {
-    arr = dummyPlayers(22);
+    arr = preArr || dummyPlayers(22);
   } else {
     const { data, error } = await sb.from('players').select('*').order('score', { ascending: false }).limit(20);
     if (error) console.error(error);
@@ -775,7 +784,7 @@ async function showRankingScreen() {
       const delay = (n - 1 - i) * 0.22;
       return `<div class="rank-row ${isMe ? 'me' : ''} ${isTop5 ? 'top5' : ''}" style="animation-delay: ${delay}s">
         <div class="rank-pos">${crown || (i + 1)}</div>
-        <div class="rank-name">${escapeHtml(p.name)}${isMe ? ' (あなた)' : ''}</div>
+        <div class="rank-name">${escapeHtml(p.name)}</div>
         <div class="rank-score">${p.score || 0}</div>
       </div>`;
     }).join('');
@@ -993,7 +1002,7 @@ function renderResultScreen(arr) {
     const crown = ['👑','🥈','🥉','🏅','🏅'][i] || '';
     return `<div class="rank-row ${isMe ? 'me' : ''} ${isTop5 ? 'top5' : ''}" style="animation-delay: ${i * 0.06}s">
       <div class="rank-pos">${crown || (i + 1)}</div>
-      <div class="rank-name">${escapeHtml(p.name)}${isMe ? ' (あなた)' : ''}</div>
+      <div class="rank-name">${escapeHtml(p.name)}</div>
       <div class="rank-score">${p.score}</div>
     </div>`;
   }).join('');
@@ -1117,6 +1126,7 @@ window.testNext = function() {
 function handleTestState() {
   const q = currentQuiz;
   const btn = document.getElementById('test-next');
+  if (q.state !== 'question' && q.state !== 'answer') clearRevealPill();
   if (q.state === 'waiting') {
     stopWaitBgm();
     toggleReadyGo(false);
@@ -1139,14 +1149,16 @@ function handleTestState() {
     revealAnswerTest(q);
     btn.textContent = (q.current_idx + 1 >= q.questions.length) ? '🏁 結果発表' : '▶ 次へ';
   } else if (q.state === 'finished') {
-    runFinale(dummyPlayersWithMe());
+    const finalArr = dummyPlayersWithMe();
+    if (bcTest) bcTest.postMessage({ type: 'final', players: finalArr });
+    runFinale(finalArr);
     btn.textContent = '↺ 最初から';
   }
 }
 
 function dummyPlayersWithMe() {
   const arr = dummyPlayers(21);
-  arr.splice(2, 0, { id: myId, name: 'あなた(テスト)', score: arr[2].score + 1 });
+  arr.splice(2, 0, { id: myId, name: 'テスト', score: arr[2].score + 1 });
   arr.sort((a, b) => b.score - a.score);
   return arr;
 }
@@ -1186,7 +1198,6 @@ function revealAnswerTest(q) {
     total: tTotal, correctCount: tCorrect,
     rate: tTotal > 0 ? Math.round(tCorrect / tTotal * 100) : 0
   };
-  showRateBanner(tStat); // 次の質問まで表示し続ける
   showRevealOverlay(myCorrect, points, isLast && myCorrect, tStat);
   // 問題別データ(疑似)を管理画面のボードへ送信 → 機能チェック用
   if (bcTest) {
@@ -1198,8 +1209,10 @@ function revealAnswerTest(q) {
 window.testRanking = function() {
   getAudioCtx();
   currentQuiz.state = 'ranking';
+  const arr = dummyPlayers(22);
+  if (bcTest) bcTest.postMessage({ type: 'ranking', players: arr });
   broadcastTestState();
-  showRankingScreen();
+  showRankingScreen(arr);
   const btn = document.getElementById('test-next');
   btn.textContent = '↩ 戻る';
 }
@@ -1210,6 +1223,7 @@ window.testReset = function() {
   const cdOverlay = document.getElementById('countdown-overlay');
   if (cdOverlay) cdOverlay.remove();
   removeFinale();
+  clearRevealPill();
   revealedRounds.clear();
   currentQuiz = loadTestQuiz();
   mySelected = -1;

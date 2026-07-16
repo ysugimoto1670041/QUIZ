@@ -1,5 +1,5 @@
-// 同期会クイズ v3.2 (2026-07-16) - play.js
-console.log('同期会クイズ v3.2 (2026-07-16) - play.js loaded');
+// 同期会クイズ v3.3 (2026-07-16) - play.js
+console.log('同期会クイズ v3.3 (2026-07-16) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -429,6 +429,8 @@ async function fetchQuiz() {
     const distStamp = light.updated_at;
     (async () => {
       try {
+        // ⑤ 50台同時の取得バーストを避けるため0〜4秒に分散
+        await new Promise(r => setTimeout(r, Math.random() * 4000));
         const { data: qq } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
         if (qq && Array.isArray(qq.questions)) {
           questionsCache = qq.questions;
@@ -511,7 +513,15 @@ function handleStateChange(q) {
     stopWaitBgm();
     if (lastState !== stateKey) {
       mySelected = -1;
-      showQuestion(q);
+      if (PREVIEW) {
+        // ④ 管理画面プレビューはPC側なので0.6秒遅らせてスマホと表示開始を揃える
+        const qq = q;
+        setTimeout(() => {
+          if (currentQuiz && currentQuiz.state === 'question' && currentQuiz.current_idx === qq.current_idx) showQuestion(qq);
+        }, 600);
+      } else {
+        showQuestion(q);
+      }
     } else {
       // ③ タイムアップ済みならポーリングで再起動しない (鐘が繰り返されるバグの修正)
       if (!timerInterval && timerDoneKey !== stateKey) startTimer(q);
@@ -657,8 +667,8 @@ function startTimer(q) {
     fillEl.style.width = Math.min(100, frac * 100) + '%';
     const sec = Math.ceil(remaining / 1000);
     textEl.textContent = sec + '秒';
-    // だんだん速く・強くなる「心臓ドキドキ」音 (回答時間中ずっと)
-    if (remaining > 0 && elapsed >= 0) {
+    // ① 心臓ドキドキ音は残り10秒まで (以降はプロジェクターのカウントダウンmp3に譲る)
+    if (remaining > 10000 && elapsed >= 0) {
       const gap = Math.max(300, 1000 * frac + 200); // 鼓動の間隔がどんどん短く
       const now = Date.now();
       if (now - lastUrge >= gap) {
@@ -682,7 +692,7 @@ function startTimer(q) {
       clearInterval(timerInterval);
       timerInterval = null;
       timerDoneKey = 'question:' + (currentQuiz ? currentQuiz.current_idx : -1);
-      playTimeUpBell(); // 終了を告げる鐘 (1回のみ)
+      // ① タイムアップ音はプロジェクター側の se_timeout.mp3 のみ (旧・鐘は廃止)
       if (!PREVIEW && mySelected < 0) {
         submitAnswer(-1);
       }

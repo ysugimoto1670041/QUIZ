@@ -1,5 +1,5 @@
-// 同期会クイズ v3.2 (2026-07-16) - admin.js
-console.log('同期会クイズ v3.2 (2026-07-16) - admin.js loaded');
+// 同期会クイズ v3.3 (2026-07-16) - admin.js
+console.log('同期会クイズ v3.3 (2026-07-16) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -322,6 +322,8 @@ async function getQuiz() {
     const distStamp = light.updated_at;
     (async () => {
       try {
+        // ⑤ 50台同時の取得バーストを避けるため0〜4秒に分散
+        await new Promise(r => setTimeout(r, Math.random() * 4000));
         const { data: qq } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
         if (qq && Array.isArray(qq.questions)) {
           adminQsCache = qq.questions;
@@ -395,6 +397,26 @@ window.backToStart = async function() {
   localStorage.removeItem('ltcb_quiz_finished_at');
   updateElapsed();
 }
+
+// ④ 音源mp3が正しくアップロードされているかの点検
+window.checkSfxFiles = function() {
+  const files = ['bgm_qr.mp3', 'bgm_ready.mp3', 'se_countdown10.mp3', 'se_timeout.mp3', 'se_reveal.mp3', 'se_champion.mp3'];
+  const state = {};
+  files.forEach(f => {
+    state[f] = 'pending';
+    const a = new Audio(f);
+    a.addEventListener('canplaythrough', () => { state[f] = 'ok'; }, { once: true });
+    a.addEventListener('error', () => { state[f] = 'ng'; }, { once: true });
+    a.load();
+  });
+  setTimeout(() => {
+    const missing = files.filter(f => state[f] !== 'ok');
+    alert(missing.length
+      ? '⚠ 読み込めない音源ファイル:\n' + missing.join('\n') + '\n\nGitHubのQUIZ直下にmp3がアップロードされているか確認してください。'
+      : '✅ 音源6ファイルすべて確認できました');
+  }, 6000);
+  alert('音源ファイルを点検中です… 6秒後に結果を表示します');
+};
 
 window.endQuiz = async function() {
   await upsertQuiz({ state: 'finished' });
@@ -548,6 +570,13 @@ async function refreshLive() {
 // ========== 問題別データボード (平均回答時間 / 正答率) ==========
 let testBoardRows = []; // 🧪テストモードの疑似データ
 
+// ② ボードのチラつき防止: 内容が変わった時だけ描き替える
+function setBoardHtml(el, html) {
+  if (el.__lastHtml === html) return;
+  el.__lastHtml = html;
+  el.innerHTML = html;
+}
+
 // 参加者画面のテストから疑似データを受信
 if ('BroadcastChannel' in window) {
   const bcAdmin = new BroadcastChannel('ltcb-test-sync');
@@ -559,6 +588,12 @@ if ('BroadcastChannel' in window) {
     } else if (m.type === 'reset') {
       testBoardRows = [];
       if (pvMode === 'test') renderTestBoard();
+    } else if (m.type === 'state' && (m.state === 'ready' || m.state === 'waiting')) {
+      // ② 新しいテストが始まったら前回の結果をクリア
+      if (testBoardRows.length) {
+        testBoardRows = [];
+        if (pvMode === 'test') renderTestBoard();
+      }
     }
   };
 }
@@ -568,14 +603,14 @@ function renderTestBoard() {
   if (!el) return;
   const rows = testBoardRows.filter(Boolean);
   if (rows.length === 0) {
-    el.innerHTML = '<div class="qb-empty">🧪 テストで正解発表すると疑似データが表示されます</div>';
+    setBoardHtml(el, '<div class="qb-empty">🧪 テストで正解発表すると疑似データが表示されます</div>');
     return;
   }
-  el.innerHTML = rows.map((r, i) => `<div class="qb-row" style="animation-delay:${i * 0.05}s">
+  setBoardHtml(el, rows.map((r) => `<div class="qb-row qb-static">
     <span class="qb-q">第${r.idx + 1}問</span>
     <span class="qb-t">⏱ 平均 ${r.avgT.toFixed(1)}秒</span>
     <span class="qb-p">🎯 正答率 ${r.rate}%</span>
-  </div>`).join('');
+  </div>`).join(''));
 }
 
 async function updateQuestionBoard(quiz) {
@@ -594,7 +629,7 @@ async function updateQuestionBoard(quiz) {
     doneUpTo = (quiz.state === 'question') ? quiz.current_idx - 1 : quiz.current_idx;
   }
   if (doneUpTo < 0 || qs.length === 0 || playersCount === 0) {
-    el.innerHTML = '<div class="qb-empty">正解発表後に自動で追加されます</div>';
+    setBoardHtml(el, '<div class="qb-empty">正解発表後に自動で追加されます</div>');
     return;
   }
 
@@ -614,13 +649,13 @@ async function updateQuestionBoard(quiz) {
     const correct = qs[i] ? qs[i].correct : 0;
     const cc = rows.filter(a => a.choice === correct).length;
     const rate = Math.round(cc / playersCount * 100);
-    html += `<div class="qb-row" style="animation-delay:${i * 0.05}s">
+    html += `<div class="qb-row qb-static">
       <span class="qb-q">第${i + 1}問</span>
       <span class="qb-t">⏱ 平均 ${avgT.toFixed(1)}秒</span>
       <span class="qb-p">🎯 正答率 ${rate}%</span>
     </div>`;
   }
-  el.innerHTML = html || '<div class="qb-empty">正解発表後に自動で追加されます</div>';
+  setBoardHtml(el, html || '<div class="qb-empty">正解発表後に自動で追加されます</div>');
 }
 
 async function refreshPlayers() {
@@ -755,10 +790,10 @@ function setupPreviewTabs() {
       pvMode = b.dataset.mode;
       const isTest = pvMode === 'test';
       document.getElementById('preview-frame').src =
-        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=36';
+        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=37';
       // プロジェクターを連動切替 (テスト時は参加者画面に追従する連動テストモード)
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=36' + (isTest ? '&test=1&follow=1' : '');
+        'projector.html?embed=1&v=37' + (isTest ? '&test=1&follow=1' : '');
       setProjTabActive(isTest ? 'test' : 'live');
       if (!isTest) { testBoardRows = []; }
       updateQuestionBoard(currentLiveQuiz);
@@ -777,7 +812,7 @@ function setupPreviewTabs() {
       document.querySelectorAll('.proj-col .pj-tab').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=36' + (b.dataset.mode === 'test' ? '&test=1' : '');
+        'projector.html?embed=1&v=37' + (b.dataset.mode === 'test' ? '&test=1' : '');
     });
   });
   const pjReload = document.querySelector('.proj-col .pj-reload');

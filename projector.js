@@ -1,5 +1,5 @@
-// 同期会クイズ v3.2 (2026-07-16) - projector.js
-console.log('同期会クイズ v3.2 (2026-07-16) - projector.js loaded');
+// 同期会クイズ v3.3 (2026-07-16) - projector.js
+console.log('同期会クイズ v3.3 (2026-07-16) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -70,11 +70,14 @@ function hideAudioHint() {
   const b = document.getElementById('audio-hint');
   if (b) b.remove();
 }
-let projMuted = false; // ⑤ 多重起動検知時の自動消音フラグ
+let projMuted = false;            // 多重起動検知時の自動消音フラグ
+let embedSoundOn = false;         // ④ 埋込ライブプレビューが音源を担うか
+let lastStandaloneAlive = 0;      // ④ 単独プロジェクターウィンドウの生存確認
+const PC_SYNC_DELAY = 600;        // ④ スマホ勢と表示開始を揃えるPC側の同期ディレイ(ms)
 
 function playTone(freq, duration, type = 'sine', volume = 0.2) {
-  if (projMuted) return; // ⑤ 新しい画面に音を譲る
-  if (EMBED && !TESTP) return; // 埋め込みライブプレビューは無音 (テストは音の確認も可能)
+  if (projMuted) return;
+  if (EMBED && !TESTP && !embedSoundOn) return; // ④ 単独ウィンドウ不在時は埋込も音源になれる
   const ctx = getAudioCtx();
   if (!ctx) return;
   if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) {} }
@@ -123,6 +126,7 @@ document.addEventListener('click', unlockAudio, { once: true });
 // シンバルクラッシュ (ノイズバースト)
 function playCrash(delay = 0) {
   if (projMuted) return;
+  if (EMBED && !TESTP && !embedSoundOn) return;
   const ctx = getAudioCtx();
   if (!ctx) return;
   setTimeout(() => {
@@ -220,7 +224,7 @@ function preloadSfx() {
 function playSfx(k, opts) {
   opts = opts || {};
   if (projMuted) return;
-  if (EMBED && !TESTP) return;
+  if (EMBED && !TESTP && !embedSoundOn) return; // ④
   try {
     const a = getSfx(k);
     a.loop = !!opts.loop;
@@ -235,6 +239,11 @@ function stopSfx(k) {
   if (a) { try { a.pause(); a.currentTime = 0; } catch (e) {} }
 }
 function stopBgmSfx() { stopSfx('qr'); stopSfx('ready'); }
+// ③ QR待受BGMが止まっていたら再開 (オールリセット後・復帰後も確実に流す)
+function ensureQrBgm() {
+  const a = sfxPool['qr'];
+  if (!a || a.paused) playSfx('qr', { loop: true });
+}
 
 function playQuestionSting() {
   [330, 415, 494].forEach(f => playTone(f, 0.14, 'sawtooth', 0.08));
@@ -465,6 +474,8 @@ async function fetchQuizP() {
     const distStamp = light.updated_at;
     (async () => {
       try {
+        // ⑤ 50台同時の取得バーストを避けるため0〜4秒に分散
+        await new Promise(r => setTimeout(r, Math.random() * 4000));
         const { data: qq } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
         if (qq && Array.isArray(qq.questions)) {
           questionsCacheP = qq.questions;
@@ -485,7 +496,7 @@ function handleState(q) {
   if (q.state === 'waiting') {
     stopWaitBgm();
     stopSfx('ready');
-    if (lastKey !== key) playSfx('qr', { loop: true }); // ① QR待受BGM
+    ensureQrBgm(); // ①③ QR待受BGM (リセット後も確実に再開)
     toggleReadyP(false);
     showP('waiting');
   } else if (q.state === 'ready') {
@@ -497,7 +508,14 @@ function handleState(q) {
   } else if (q.state === 'question') {
     stopWaitBgm();
     stopBgmSfx();
-    if (lastKey !== key) showQuestionP(q);
+    if (lastKey !== key) {
+      const qq = q;
+      // ④ PC側は意図的に0.6秒遅らせ、スマホ端末との表示開始を揃える
+      //    (3,2,1の数字自体は全端末が同じ絶対時刻基準で同期)
+      setTimeout(() => {
+        if (quiz && quiz.state === 'question' && quiz.current_idx === qq.current_idx) showQuestionP(qq);
+      }, PC_SYNC_DELAY);
+    }
   } else if (q.state === 'answer') {
     stopBgmSfx();
     if (lastKey !== key) revealP(q);
@@ -622,12 +640,19 @@ function startTimerP(q) {
   let lastUrge = 0;
 
   let count10Played = false;
+  let lastUrgeP = 0;
   timerInt = setInterval(() => {
     const remaining = Math.max(0, limit - (Date.now() - startedAt));
     const frac = remaining / limit;
     fill.style.width = Math.min(100, frac * 100) + '%';
     const sec = Math.ceil(remaining / 1000);
-    // ③ 残り10秒でカウントダウン効果音 (mp3)
+    // ① 残り10秒までは従来の心臓ドキドキ音
+    if (remaining > 10000) {
+      const gap = Math.max(300, 1000 * frac + 200);
+      const now = Date.now();
+      if (now - lastUrgeP >= gap) { lastUrgeP = now; playUrgeTick(frac); }
+    }
+    // ① 残り10秒を切ったら se_countdown10.mp3 のみ
     if (!count10Played && remaining > 0 && remaining <= 10000) {
       count10Played = true;
       playSfx('count10');
@@ -1118,7 +1143,18 @@ function showMutedBadge() {
   if (document.getElementById('muted-badge')) return;
   const d = document.createElement('div');
   d.id = 'muted-badge';
-  d.textContent = '🔇 新しいプロジェクター画面が開かれたため、この画面は消音しました (このタブは閉じてOK)';
+  d.innerHTML = '🔇 この画面は消音中です (別のプロジェクター画面が音源) <button id="reclaim-btn" style="margin-left:1vw;font-family:inherit;font-weight:900;font-size:1.8vh;padding:0.5vh 1.5vw;border:none;border-radius:999px;background:#ff9800;color:#fff;cursor:pointer;">🔊 この画面で鳴らす</button>';
+  setTimeout(() => {
+    const b = document.getElementById('reclaim-btn');
+    if (b) b.onclick = () => {
+      projMuted = false;
+      try { if (window.__projDupBc) window.__projDupBc.postMessage({ type: 'claim', tag: window.__projTag }); } catch (e) {}
+      const x = document.getElementById('muted-badge'); if (x) x.remove();
+      try { getAudioCtx().resume(); } catch (e) {}
+      preloadSfx();
+      ensureStateBgm();
+    };
+  }, 0);
   d.style.cssText = 'position:fixed;top:1.5vh;left:50%;transform:translateX(-50%);z-index:2500;font-weight:900;font-size:2vh;padding:1vh 2.5vw;border-radius:999px;background:#555;color:#fff;box-shadow:0 1vh 3vh rgba(0,0,0,.4);max-width:92vw;text-align:center;';
   document.body.appendChild(d);
 }
@@ -1136,21 +1172,93 @@ if (!EMBED && 'BroadcastChannel' in window) {
   try {
     const dupBc = new BroadcastChannel('ltcb-proj-live');
     const myTag = Math.random().toString(36).slice(2);
+    window.__projDupBc = dupBc;
+    window.__projTag = myTag;
     dupBc.onmessage = (ev) => {
       const m = ev.data || {};
       if (m.tag === myTag) return;
       if (m.type === 'hello') {
-        // ⑤ 新しいプロジェクター画面が開いた → この(古い)画面は自動で消音し、音のダブりを根絶
+        // 新しいプロジェクター画面が開いた → この(古い)画面は自動で消音
         dupBc.postMessage({ type: 'here', tag: myTag });
         projMuted = true;
         stopWaitBgm();
+        stopBgmSfx();
         showMutedBadge();
       } else if (m.type === 'here') {
         showDupWarn();
+      } else if (m.type === 'claim') {
+        // ④ 他の画面が音源を取り戻した
+        projMuted = true;
+        stopWaitBgm();
+        stopBgmSfx();
+        showMutedBadge();
       }
     };
     dupBc.postMessage({ type: 'hello', tag: myTag });
+    // ④ 生存ビーコン (埋込プレビューが単独ウィンドウの有無を判断できるように)
+    setInterval(() => {
+      try { if (!projMuted) dupBc.postMessage({ type: 'alive', tag: myTag }); } catch (e) {}
+    }, 2000);
   } catch (e) {}
+}
+
+// ④ 埋込ライブプレビュー: 単独ウィンドウが無ければ音源を担える
+function ensureStateBgm() {
+  if (!quiz) return;
+  if (quiz.state === 'waiting') ensureQrBgm();
+  else if (quiz.state === 'ready') playSfx('ready', { loop: true });
+}
+function showEmbedSoundBtn() {
+  if (document.getElementById('embed-sound-btn')) return;
+  const b = document.createElement('button');
+  b.id = 'embed-sound-btn';
+  b.textContent = '🔊 このプレビューから音を鳴らす (プロジェクター画面が未起動)';
+  b.style.cssText = 'position:fixed;bottom:3vh;left:50%;transform:translateX(-50%);z-index:2500;font-family:inherit;font-weight:900;font-size:2.2vh;padding:1.2vh 2.5vw;border:none;border-radius:999px;background:#ff9800;color:#fff;box-shadow:0 1vh 3vh rgba(0,0,0,.4);cursor:pointer;max-width:94vw;';
+  b.onclick = () => {
+    embedSoundOn = true;
+    getAudioCtx();
+    startAudioWatchdog();
+    preloadSfx();
+    try { getAudioCtx().resume(); } catch (e) {}
+    removeEmbedSoundBtn();
+    showEmbedSoundInd();
+    ensureStateBgm();
+  };
+  document.body.appendChild(b);
+}
+function removeEmbedSoundBtn() { const b = document.getElementById('embed-sound-btn'); if (b) b.remove(); }
+function showEmbedSoundInd() {
+  if (document.getElementById('embed-sound-ind')) return;
+  const d = document.createElement('div');
+  d.id = 'embed-sound-ind';
+  d.textContent = '🔊 音源: このプレビュー';
+  d.style.cssText = 'position:fixed;top:1vh;right:1vw;z-index:2400;font-weight:900;font-size:1.7vh;padding:0.5vh 1.5vw;border-radius:999px;background:rgba(46,125,50,0.9);color:#fff;';
+  document.body.appendChild(d);
+}
+function removeEmbedSoundInd() { const d = document.getElementById('embed-sound-ind'); if (d) d.remove(); }
+
+if (EMBED && !TESTP && 'BroadcastChannel' in window) {
+  try {
+    const embedBc = new BroadcastChannel('ltcb-proj-live');
+    embedBc.onmessage = (ev) => {
+      const m = ev.data || {};
+      if (m.type === 'alive' || m.type === 'hello' || m.type === 'here' || m.type === 'claim') {
+        lastStandaloneAlive = Date.now();
+        if (embedSoundOn) {
+          // 単独プロジェクターウィンドウに音を譲る
+          embedSoundOn = false;
+          stopWaitBgm();
+          stopBgmSfx();
+          removeEmbedSoundInd();
+        }
+      }
+    };
+  } catch (e) {}
+  setInterval(() => {
+    if (embedSoundOn) { removeEmbedSoundBtn(); return; }
+    if (Date.now() - lastStandaloneAlive > 6000) showEmbedSoundBtn();
+    else removeEmbedSoundBtn();
+  }, 2000);
 }
 
 // ========== QRコード ==========

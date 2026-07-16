@@ -1,5 +1,5 @@
-// 同期会クイズ v3.1 (2026-07-16) - projector.js
-console.log('同期会クイズ v3.1 (2026-07-16) - projector.js loaded');
+// 同期会クイズ v3.2 (2026-07-16) - projector.js
+console.log('同期会クイズ v3.2 (2026-07-16) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -199,6 +199,43 @@ function playRevealJingle() {
   }, 480);
 }
 
+// ==== ③ MP3効果音・BGM (会場音源) ====
+const SFX_FILES = {
+  qr: 'bgm_qr.mp3',            // ① QRコード待受BGM (ループ)
+  ready: 'bgm_ready.mp3',      // ② READY GO画面BGM (ループ)
+  count10: 'se_countdown10.mp3', // ③ 残り10秒カウントダウン
+  timeout: 'se_timeout.mp3',   // ④ タイムアップ
+  reveal: 'se_reveal.mp3',     // ⑤ 正解発表
+  champion: 'se_champion.mp3'  // ⑥ 優勝者発表
+};
+const sfxPool = {};
+function getSfx(k) {
+  let a = sfxPool[k];
+  if (!a) { a = new Audio(SFX_FILES[k]); a.preload = 'auto'; sfxPool[k] = a; }
+  return a;
+}
+function preloadSfx() {
+  Object.keys(SFX_FILES).forEach(k => { try { getSfx(k).load(); } catch (e) {} });
+}
+function playSfx(k, opts) {
+  opts = opts || {};
+  if (projMuted) return;
+  if (EMBED && !TESTP) return;
+  try {
+    const a = getSfx(k);
+    a.loop = !!opts.loop;
+    a.volume = (opts.volume !== undefined) ? opts.volume : 1;
+    a.currentTime = 0;
+    const p = a.play();
+    if (p && p.catch) p.catch(() => {});
+  } catch (e) {}
+}
+function stopSfx(k) {
+  const a = sfxPool[k];
+  if (a) { try { a.pause(); a.currentTime = 0; } catch (e) {} }
+}
+function stopBgmSfx() { stopSfx('qr'); stopSfx('ready'); }
+
 function playQuestionSting() {
   [330, 415, 494].forEach(f => playTone(f, 0.14, 'sawtooth', 0.08));
   setTimeout(() => {
@@ -388,7 +425,7 @@ async function connect() {
       handleState(data);
     }
     refreshCount();
-  }, 2500);
+  }, 1200); // ① 軽量化により高頻度ポーリング
 }
 
 async function refreshCount() {
@@ -415,12 +452,27 @@ async function fetchQuizP() {
   if (!light) return null;
   // ① 待受中でも事前取得してキャッシュを温めておく (第1問の初動を最速化)
   const freshDist = (light.state === 'ready' && questionsStampP !== light.updated_at);
-  if (freshDist || !questionsCacheP) {
+  if (!questionsCacheP) {
+    // 初回のみ取得完了を待つ
     const { data: qq, error: e2 } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
     if (!e2 && qq && Array.isArray(qq.questions)) {
       questionsCacheP = qq.questions;
       if (light.state === 'ready') questionsStampP = light.updated_at;
     }
+  } else if (freshDist && !fetchQuizP._bg) {
+    // 再配信の取り込みは背景で行い、READY表示や第1問の進行を一切ブロックしない
+    fetchQuizP._bg = true;
+    const distStamp = light.updated_at;
+    (async () => {
+      try {
+        const { data: qq } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
+        if (qq && Array.isArray(qq.questions)) {
+          questionsCacheP = qq.questions;
+          questionsStampP = distStamp;
+        }
+      } catch (e) { console.warn(e); }
+      finally { fetchQuizP._bg = false; }
+    })();
   }
   return Object.assign({}, light, { questions: questionsCacheP || [] });
 }
@@ -431,29 +483,31 @@ function handleState(q) {
   if (q.state !== 'finished') removeFinale();
 
   if (q.state === 'waiting') {
-    stopWaitBgm(); // ① クイズスタート前は無音
+    stopWaitBgm();
+    stopSfx('ready');
+    if (lastKey !== key) playSfx('qr', { loop: true }); // ① QR待受BGM
     toggleReadyP(false);
     showP('waiting');
   } else if (q.state === 'ready') {
-    if (lastKey !== key) {
-      playStart();
-      // ④ チャイムと重ならないよう、BGMは1.5秒後に開始
-      setTimeout(() => { if (quiz && quiz.state === 'ready') startWaitBgm(); }, 1500);
-    } else {
-      startWaitBgm();
-    }
+    stopWaitBgm();
+    stopSfx('qr');
+    if (lastKey !== key) playSfx('ready', { loop: true }); // ② READY GO BGM (第1問開始まで)
     toggleReadyP(true);
     showP('waiting');
   } else if (q.state === 'question') {
     stopWaitBgm();
+    stopBgmSfx();
     if (lastKey !== key) showQuestionP(q);
   } else if (q.state === 'answer') {
+    stopBgmSfx();
     if (lastKey !== key) revealP(q);
   } else if (q.state === 'ranking') {
     stopWaitBgm();
+    stopBgmSfx();
     if (lastKey !== key) showRankingP();
   } else if (q.state === 'finished') {
     stopWaitBgm();
+    stopBgmSfx();
     if (lastKey !== key) showFinishedP();
   }
   lastKey = key;
@@ -567,19 +621,16 @@ function startTimerP(q) {
   fill.classList.remove('warn');
   let lastUrge = 0;
 
+  let count10Played = false;
   timerInt = setInterval(() => {
     const remaining = Math.max(0, limit - (Date.now() - startedAt));
     const frac = remaining / limit;
     fill.style.width = Math.min(100, frac * 100) + '%';
     const sec = Math.ceil(remaining / 1000);
-    // だんだん速く・強くなる「心臓ドキドキ」音
-    if (remaining > 0) {
-      const gap = Math.max(300, 1000 * frac + 200);
-      const now = Date.now();
-      if (now - lastUrge >= gap) {
-        lastUrge = now;
-        playUrgeTick(frac);
-      }
+    // ③ 残り10秒でカウントダウン効果音 (mp3)
+    if (!count10Played && remaining > 0 && remaining <= 10000) {
+      count10Played = true;
+      playSfx('count10');
     }
     // 残り5秒: 投票数を表示してライブ更新 (迷っている人の決断を促す)
     if (remaining > 0 && remaining <= 5000 && quiz && quiz.state === 'question') {
@@ -595,7 +646,8 @@ function startTimerP(q) {
     if (sec <= 5) fill.classList.add('warn');
     if (remaining <= 0) {
       clearInterval(timerInt); timerInt = null;
-      playTimeUpBell(); // ② 終了を告げる鐘
+      stopSfx('count10');
+      playSfx('timeout'); // ④ タイムアップ (mp3)
     }
   }, 100);
 }
@@ -662,7 +714,8 @@ async function revealP(q) {
     }
   });
 
-  playRevealJingle(); // ② 正解発表の効果音 (通信を待たず即発音)
+  stopSfx('count10');
+  playSfx('reveal'); // ⑤ 正解発表 (mp3)
   fireConfetti();
 
   // 正答率バナー (正解者数 ÷ 参加者数)。取得失敗時は2.5秒後に自動再試行【自己修復】
@@ -836,10 +889,7 @@ function championP(stage, p) {
       <div class="champ-name">${escapeHtml(p.name)}</div>
       <div class="champ-score">${p.score} pts</div>
     </div>`;
-  playCrash(0);
-  playCelebrationFanfare();
-  playCrash(1600);
-  setTimeout(playFanfare, 1900);
+  playSfx('champion'); // ⑥ 優勝者発表 (mp3)
   fireConfetti();
   setTimeout(fireConfetti, 900);
   setTimeout(fireConfetti, 2000);
@@ -1119,7 +1169,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (EMBED) {
     // 管理画面内プレビュー: クリック不要で即開始 (無音)
     document.getElementById('start-overlay').remove();
-    if (TESTP) startAudioWatchdog();
+    if (TESTP) { startAudioWatchdog(); preloadSfx(); }
     if (TESTP && FOLLOW) setupFollowP();
     else if (TESTP) setupTestP();
     else connect();
@@ -1136,7 +1186,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('start-overlay').remove();
     getAudioCtx();
     startAudioWatchdog();
-    playStart();
+    preloadSfx();
     try { await document.documentElement.requestFullscreen(); } catch (e) {}
     if (TESTP && FOLLOW) setupFollowP();
     else if (TESTP) setupTestP();

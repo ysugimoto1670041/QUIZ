@@ -1,5 +1,5 @@
-// 同期会クイズ v3.1 (2026-07-16) - admin.js
-console.log('同期会クイズ v3.1 (2026-07-16) - admin.js loaded');
+// 同期会クイズ v3.2 (2026-07-16) - admin.js
+console.log('同期会クイズ v3.2 (2026-07-16) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -311,12 +311,25 @@ async function getQuiz() {
   if (!light) return null;
   // ① 待受中でも事前取得してキャッシュを温めておく (第1問の初動を最速化)
   const freshDist = (light.state === 'ready' && adminQsStamp !== light.updated_at);
-  if (freshDist || !adminQsCache) {
+  if (!adminQsCache) {
     const { data: qq, error: e2 } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
     if (!e2 && qq && Array.isArray(qq.questions)) {
       adminQsCache = qq.questions;
       if (light.state === 'ready') adminQsStamp = light.updated_at;
     }
+  } else if (freshDist && !getQuiz._bg) {
+    getQuiz._bg = true;
+    const distStamp = light.updated_at;
+    (async () => {
+      try {
+        const { data: qq } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
+        if (qq && Array.isArray(qq.questions)) {
+          adminQsCache = qq.questions;
+          adminQsStamp = distStamp;
+        }
+      } catch (e) { console.warn(e); }
+      finally { getQuiz._bg = false; }
+    })();
   }
   return Object.assign({}, light, { questions: adminQsCache || [] });
 }
@@ -742,10 +755,10 @@ function setupPreviewTabs() {
       pvMode = b.dataset.mode;
       const isTest = pvMode === 'test';
       document.getElementById('preview-frame').src =
-        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=35';
+        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=36';
       // プロジェクターを連動切替 (テスト時は参加者画面に追従する連動テストモード)
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=35' + (isTest ? '&test=1&follow=1' : '');
+        'projector.html?embed=1&v=36' + (isTest ? '&test=1&follow=1' : '');
       setProjTabActive(isTest ? 'test' : 'live');
       if (!isTest) { testBoardRows = []; }
       updateQuestionBoard(currentLiveQuiz);
@@ -764,7 +777,7 @@ function setupPreviewTabs() {
       document.querySelectorAll('.proj-col .pj-tab').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=35' + (b.dataset.mode === 'test' ? '&test=1' : '');
+        'projector.html?embed=1&v=36' + (b.dataset.mode === 'test' ? '&test=1' : '');
     });
   });
   const pjReload = document.querySelector('.proj-col .pj-reload');

@@ -1,5 +1,5 @@
-// 同期会クイズ v3.1 (2026-07-16) - play.js
-console.log('同期会クイズ v3.1 (2026-07-16) - play.js loaded');
+// 同期会クイズ v3.2 (2026-07-16) - play.js
+console.log('同期会クイズ v3.2 (2026-07-16) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -416,12 +416,27 @@ async function fetchQuiz() {
 
   // ① 待受中でも事前取得してキャッシュを温めておく (第1問の初動を最速化)
   const freshDist = (light.state === 'ready' && questionsFetchedStamp !== light.updated_at);
-  if (freshDist || !questionsCache) {
+  if (!questionsCache) {
+    // 初回のみ取得完了を待つ
     const { data: qq, error: e2 } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
     if (!e2 && qq && Array.isArray(qq.questions)) {
       questionsCache = qq.questions;
       if (light.state === 'ready') questionsFetchedStamp = light.updated_at;
     }
+  } else if (freshDist && !fetchQuiz._bg) {
+    // 再配信の取り込みは背景で行い、READY表示や第1問の進行を一切ブロックしない
+    fetchQuiz._bg = true;
+    const distStamp = light.updated_at;
+    (async () => {
+      try {
+        const { data: qq } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
+        if (qq && Array.isArray(qq.questions)) {
+          questionsCache = qq.questions;
+          questionsFetchedStamp = distStamp;
+        }
+      } catch (e) { console.warn(e); }
+      finally { fetchQuiz._bg = false; }
+    })();
   }
   return Object.assign({}, light, { questions: questionsCache || [] });
 }
@@ -469,7 +484,7 @@ async function startWatchQuiz() {
         currentQuiz = q;
         handleStateChange(q);
       }
-    }, 2500);
+    }, 1200); // ① 軽量化により高頻度ポーリングが可能 (タイムラグ半減)
   }
 }
 

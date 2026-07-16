@@ -1,5 +1,5 @@
-// 同期会クイズ v3.3 (2026-07-16) - projector.js
-console.log('同期会クイズ v3.3 (2026-07-16) - projector.js loaded');
+// 同期会クイズ v3.3.1 (2026-07-16) - projector.js
+console.log('同期会クイズ v3.3.1 (2026-07-16) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -588,8 +588,11 @@ function showQuestionP(q) {
   const effStart = effectiveStart(q);
   if (Date.now() < effStart) {
     showCountdownP(effStart, () => startTimerP(q), isLastQuestion(q));
+  } else if (Date.now() - effStart < 3500) {
+    // 時計ズレ耐性: 出題直後の受信なら短い秒読みでマスク (公平性)
+    showCountdownP(Date.now() + 1800, () => startTimerP(q), isLastQuestion(q));
   } else {
-    playQuestionSting(); // カウントダウンを逃した場合も出題の合図を鳴らす
+    playQuestionSting(); // 本当に途中参加の場合のみ即表示+出題の合図
     startTimerP(q);
   }
 }

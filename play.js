@@ -1,5 +1,5 @@
-// 同期会クイズ v3.3 (2026-07-16) - play.js
-console.log('同期会クイズ v3.3 (2026-07-16) - play.js loaded');
+// 同期会クイズ v3.3.1 (2026-07-16) - play.js
+console.log('同期会クイズ v3.3.1 (2026-07-16) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -603,7 +603,17 @@ function showQuestion(q) {
       choicesEl.classList.remove('locked');
       startTimer(q);
     }, isLastQuestion(q));
+  } else if (Date.now() - effStart < 3500) {
+    // 端末の時計が数秒進んでいる場合の公平性ガード:
+    // 「秒読みは終了済み」と判断しても、出題直後(3.5秒以内)の受信なら
+    // 他の端末はまだ秒読み中の可能性が高いため、短い秒読みで問題をマスクする
+    choicesEl.classList.add('locked');
+    showCountdown(Date.now() + 1800, () => {
+      choicesEl.classList.remove('locked');
+      startTimer(q);
+    }, isLastQuestion(q));
   } else {
+    // 本当に途中参加 (スリープ復帰など) の場合のみ即表示
     choicesEl.classList.remove('locked');
     startTimer(q);
   }

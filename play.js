@@ -1,5 +1,5 @@
-// 同期会クイズ v3.3.1 (2026-07-16) - play.js
-console.log('同期会クイズ v3.3.1 (2026-07-16) - play.js loaded');
+// 同期会クイズ v3.3.2 (2026-07-16) - play.js
+console.log('同期会クイズ v3.3.2 (2026-07-16) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -466,15 +466,18 @@ async function startWatchQuiz() {
   // スマホのスリープ復帰時に即座に最新状態へ追随
   if (!startWatchQuiz._vis) {
     startWatchQuiz._vis = true;
-    document.addEventListener('visibilitychange', async () => {
-      if (document.visibilityState !== 'visible') return;
+    const resync = async () => {
       unlockAudio();
       const q = await fetchQuiz();
       if (q && (!currentQuiz || !currentQuiz.updated_at || q.updated_at >= currentQuiz.updated_at)) {
         currentQuiz = q;
         handleStateChange(q);
       }
-    });
+    };
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resync(); });
+    // iPad等はタブが前面でもタイマーが抑制されることがあるため、復帰の合図を広く拾う
+    window.addEventListener('focus', resync);
+    window.addEventListener('pageshow', resync);
   }
 
   // リアルタイム通知が届かない環境向けの保険 (2.5秒ごとに状態を再取得)
@@ -603,17 +606,17 @@ function showQuestion(q) {
       choicesEl.classList.remove('locked');
       startTimer(q);
     }, isLastQuestion(q));
-  } else if (Date.now() - effStart < 3500) {
-    // 端末の時計が数秒進んでいる場合の公平性ガード:
-    // 「秒読みは終了済み」と判断しても、出題直後(3.5秒以内)の受信なら
-    // 他の端末はまだ秒読み中の可能性が高いため、短い秒読みで問題をマスクする
+  } else if ((effStart + (q.time_limit || 15) * 1000) - Date.now() > 4000) {
+    // 公平性ガード: 秒読みが終了済みに見えても、回答時間が十分(4秒超)残っているなら
+    // 必ず短い秒読みで問題をマスクする。
+    // 端末の時計ズレにも、省電力によるタイマー抑制(iPad等)での受信遅延にも頑健。
     choicesEl.classList.add('locked');
     showCountdown(Date.now() + 1800, () => {
       choicesEl.classList.remove('locked');
       startTimer(q);
     }, isLastQuestion(q));
   } else {
-    // 本当に途中参加 (スリープ復帰など) の場合のみ即表示
+    // 回答時間の終盤に受信した場合 (本当の途中参加) のみ即表示
     choicesEl.classList.remove('locked');
     startTimer(q);
   }
@@ -811,7 +814,7 @@ async function revealAnswer(q) {
   let myPointsThisRound = 0;
   if (myCorrect) {
     const limit = (q.time_limit || 15) * 1000;
-    const speedBonus = Math.max(0, Math.round(100 * (1 - (myAns.elapsed_ms / limit))));
+    const speedBonus = Math.min(100, Math.max(0, Math.round(100 * (1 - (myAns.elapsed_ms / limit)))));
     const correctCount = allCorrect.length;
     const rarityBonus = Math.round(150 / Math.max(correctCount, 1));
     myPointsThisRound = 100 + speedBonus + rarityBonus;

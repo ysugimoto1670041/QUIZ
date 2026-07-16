@@ -1,5 +1,5 @@
-// 同期会クイズ v3.3.1 (2026-07-16) - projector.js
-console.log('同期会クイズ v3.3.1 (2026-07-16) - projector.js loaded');
+// 同期会クイズ v3.3.2 (2026-07-16) - projector.js
+console.log('同期会クイズ v3.3.2 (2026-07-16) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -416,14 +416,16 @@ async function connect() {
     .subscribe();
 
   // 画面復帰時に即座に最新状態へ追随
-  document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState !== 'visible') return;
+  const resyncP = async () => {
     const data = await fetchQuizP();
     if (data && (!quiz || !quiz.updated_at || data.updated_at >= quiz.updated_at)) {
       quiz = data;
       handleState(data);
     }
-  });
+  };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resyncP(); });
+  window.addEventListener('focus', resyncP);
+  window.addEventListener('pageshow', resyncP);
 
   // リアルタイム通知が届かない環境向けの保険 (2.5秒ごとに状態を再取得)
   // ※ 古いデータで新しい表示(正解発表など)を上書きしないよう updated_at で防御
@@ -588,11 +590,11 @@ function showQuestionP(q) {
   const effStart = effectiveStart(q);
   if (Date.now() < effStart) {
     showCountdownP(effStart, () => startTimerP(q), isLastQuestion(q));
-  } else if (Date.now() - effStart < 3500) {
-    // 時計ズレ耐性: 出題直後の受信なら短い秒読みでマスク (公平性)
+  } else if ((effStart + (q.time_limit || 15) * 1000) - Date.now() > 4000) {
+    // 公平性ガード: 回答時間が十分残っているなら必ず短い秒読みでマスク
     showCountdownP(Date.now() + 1800, () => startTimerP(q), isLastQuestion(q));
   } else {
-    playQuestionSting(); // 本当に途中参加の場合のみ即表示+出題の合図
+    playQuestionSting(); // 回答終盤の受信(本当の途中参加)のみ即表示+出題の合図
     startTimerP(q);
   }
 }

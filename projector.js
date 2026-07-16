@@ -1,5 +1,5 @@
-// 同期会クイズ v3.3.2 (2026-07-16) - projector.js
-console.log('同期会クイズ v3.3.2 (2026-07-16) - projector.js loaded');
+// 同期会クイズ v3.3.3 (2026-07-16) - projector.js
+console.log('同期会クイズ v3.3.3 (2026-07-16) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1

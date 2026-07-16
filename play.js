@@ -1,5 +1,5 @@
-// 同期会クイズ v3.3.2 (2026-07-16) - play.js
-console.log('同期会クイズ v3.3.2 (2026-07-16) - play.js loaded');
+// 同期会クイズ v3.3.3 (2026-07-16) - play.js
+console.log('同期会クイズ v3.3.3 (2026-07-16) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');

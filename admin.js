@@ -1,5 +1,5 @@
-// 同期会クイズ v2.9.1 (2026-07-16) - admin.js
-console.log('同期会クイズ v2.9.1 (2026-07-16) - admin.js loaded');
+// 同期会クイズ v3.0 (2026-07-16) - admin.js
+console.log('同期会クイズ v3.0 (2026-07-16) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -306,9 +306,19 @@ document.getElementById('q-count').addEventListener('change', () => { saveLocal(
 const QUIZ_ROW_ID = 1;
 
 async function getQuiz() {
-  const { data, error } = await sb.from('quiz_state').select('*').eq('id', QUIZ_ROW_ID).maybeSingle();
-  if (error) console.error(error);
-  return data;
+  const { data: light, error } = await sb.from('quiz_state').select('id, state, current_idx, question_started_at, time_limit, updated_at').eq('id', QUIZ_ROW_ID).maybeSingle();
+  if (error) { console.error(error); return null; }
+  if (!light) return null;
+  const needQs = light.state !== 'waiting';
+  const freshDist = (light.state === 'ready' && adminQsStamp !== light.updated_at);
+  if (needQs && (freshDist || !adminQsCache)) {
+    const { data: qq, error: e2 } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
+    if (!e2 && qq && Array.isArray(qq.questions)) {
+      adminQsCache = qq.questions;
+      if (light.state === 'ready') adminQsStamp = light.updated_at;
+    }
+  }
+  return Object.assign({}, light, { questions: adminQsCache || [] });
 }
 
 async function upsertQuiz(patch) {
@@ -337,6 +347,8 @@ window.startQuiz = async function() {
     time_limit: timeLimit,
     question_started_at: 0
   });
+  adminQsCache = useQs;      // ① 自分が配信した内容をそのままキャッシュ
+  adminQsStamp = null;
 
   // 経過時間タイマーを開始
   localStorage.setItem('ltcb_quiz_started_at', String(Date.now()));
@@ -441,6 +453,8 @@ window.nextStep = async function() {
 let liveWatchStarted = false;
 let currentLiveQuiz = null;
 let playersCount = 0;
+let adminQsCache = null;   // ① ライブ用の問題キャッシュ (毎回の重い取得を防ぐ)
+let adminQsStamp = null;
 function startLiveWatch() {
   if (liveWatchStarted || !sbReady) return;
   liveWatchStarted = true;
@@ -551,8 +565,10 @@ function renderTestBoard() {
 async function updateQuestionBoard(quiz) {
   const el = document.getElementById('q-board');
   if (!el) return;
-  // 🧪 テストモード中は疑似データで機能チェック
-  if (pvMode === 'test') { renderTestBoard(); return; }
+  // ③ ライブが進行中なら常にライブの実データを表示
+  //    (テストタブに切り替えたままでもライブ結果が消えない)
+  const liveActive = quiz && quiz.current_idx >= 0 && quiz.state !== 'waiting';
+  if (pvMode === 'test' && !liveActive) { renderTestBoard(); return; }
   if (!quiz) return;
   const qs = quiz.questions || [];
 
@@ -593,7 +609,7 @@ async function updateQuestionBoard(quiz) {
 
 async function refreshPlayers() {
   const { data, error } = await sb.from('players').select('*').order('score', { ascending: false });
-  if (error) { console.error(error); return; }
+  if (error) { console.error(error); return; } // 失敗時は前回値を保持(0へ落とさない)
   playersCount = (data || []).length;
   const stat = document.getElementById('stat-players');
   const prev = stat.textContent;
@@ -723,10 +739,10 @@ function setupPreviewTabs() {
       pvMode = b.dataset.mode;
       const isTest = pvMode === 'test';
       document.getElementById('preview-frame').src =
-        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=33';
+        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=34';
       // プロジェクターを連動切替 (テスト時は参加者画面に追従する連動テストモード)
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=33' + (isTest ? '&test=1&follow=1' : '');
+        'projector.html?embed=1&v=34' + (isTest ? '&test=1&follow=1' : '');
       setProjTabActive(isTest ? 'test' : 'live');
       if (!isTest) { testBoardRows = []; }
       updateQuestionBoard(currentLiveQuiz);
@@ -745,7 +761,7 @@ function setupPreviewTabs() {
       document.querySelectorAll('.proj-col .pj-tab').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=33' + (b.dataset.mode === 'test' ? '&test=1' : '');
+        'projector.html?embed=1&v=34' + (b.dataset.mode === 'test' ? '&test=1' : '');
     });
   });
   const pjReload = document.querySelector('.proj-col .pj-reload');

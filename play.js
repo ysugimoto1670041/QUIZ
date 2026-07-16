@@ -1,5 +1,5 @@
-// 同期会クイズ v2.9.1 (2026-07-16) - play.js
-console.log('同期会クイズ v2.9.1 (2026-07-16) - play.js loaded');
+// 同期会クイズ v3.0 (2026-07-16) - play.js
+console.log('同期会クイズ v3.0 (2026-07-16) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -399,10 +399,31 @@ function removeFinale() {
 }
 
 // ========== クイズ監視 ==========
+// ============================================================
+// ① 軽量同期構造: ポーリングは状態(数百バイト)のみを取得し、
+//    写真入りの重い questions は「クイズスタート(配信)」を検知した時に1回だけ取得する。
+//    (従来は全端末が2.5秒ごとに数MBをダウンロードしており、
+//     50人同時アクセスでは回線が飽和してディレイ・音ズレの原因になっていた)
+// ============================================================
+const QUIZ_LIGHT_COLS = 'id, state, current_idx, question_started_at, time_limit, updated_at';
+let questionsCache = null;          // 配信済みの問題リスト
+let questionsFetchedStamp = null;   // どの配信(ready)の問題を取得済みか
+
 async function fetchQuiz() {
-  const { data, error } = await sb.from('quiz_state').select('*').eq('id', QUIZ_ROW_ID).maybeSingle();
-  if (error) console.error(error);
-  return data;
+  const { data: light, error } = await sb.from('quiz_state').select(QUIZ_LIGHT_COLS).eq('id', QUIZ_ROW_ID).maybeSingle();
+  if (error) { console.error(error); return null; }
+  if (!light) return null;
+
+  const needQs = light.state !== 'waiting';
+  const freshDist = (light.state === 'ready' && questionsFetchedStamp !== light.updated_at);
+  if (needQs && (freshDist || !questionsCache)) {
+    const { data: qq, error: e2 } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
+    if (!e2 && qq && Array.isArray(qq.questions)) {
+      questionsCache = qq.questions;
+      if (light.state === 'ready') questionsFetchedStamp = light.updated_at;
+    }
+  }
+  return Object.assign({}, light, { questions: questionsCache || [] });
 }
 
 async function startWatchQuiz() {
@@ -1097,10 +1118,25 @@ function renderResultScreen(arr) {
 async function showResult() {
   clearInterval(timerInterval); timerInterval = null;
 
-  const { data, error } = await sb.from('players').select('*').order('score', { ascending: false });
-  if (error) console.error(error);
-  const arr = (data || []).map(p => ({ id: p.id, name: p.name, score: p.score || 0 }));
-
+  // ④ 通信不調による誤「参加者がいません」を防ぐ: 最大3回リトライ
+  let data = null;
+  for (let i = 0; i < 3; i++) {
+    try {
+      const res = await sb.from('players').select('*').order('score', { ascending: false });
+      if (res.error) throw res.error;
+      data = res.data || [];
+      break;
+    } catch (e) {
+      console.warn('最終結果の取得に失敗 (' + (i + 1) + '/3):', e);
+      await new Promise(r => setTimeout(r, 700));
+    }
+  }
+  if (data === null) {
+    // 全滅: ポーリングで自動再試行させる
+    lastState = null;
+    return;
+  }
+  const arr = data.map(p => ({ id: p.id, name: p.name, score: p.score || 0 }));
   runFinale(arr);
 }
 

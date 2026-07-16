@@ -1,5 +1,5 @@
-// 同期会クイズ v2.9.1 (2026-07-16) - projector.js
-console.log('同期会クイズ v2.9.1 (2026-07-16) - projector.js loaded');
+// 同期会クイズ v3.0 (2026-07-16) - projector.js
+console.log('同期会クイズ v3.0 (2026-07-16) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -70,7 +70,10 @@ function hideAudioHint() {
   const b = document.getElementById('audio-hint');
   if (b) b.remove();
 }
+let projMuted = false; // ⑤ 多重起動検知時の自動消音フラグ
+
 function playTone(freq, duration, type = 'sine', volume = 0.2) {
+  if (projMuted) return; // ⑤ 新しい画面に音を譲る
   if (EMBED && !TESTP) return; // 埋め込みライブプレビューは無音 (テストは音の確認も可能)
   const ctx = getAudioCtx();
   if (!ctx) return;
@@ -119,6 +122,7 @@ document.addEventListener('click', unlockAudio, { once: true });
 
 // シンバルクラッシュ (ノイズバースト)
 function playCrash(delay = 0) {
+  if (projMuted) return;
   const ctx = getAudioCtx();
   if (!ctx) return;
   setTimeout(() => {
@@ -335,15 +339,15 @@ async function connect() {
   }
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  const { data } = await sb.from('quiz_state').select('*').eq('id', QUIZ_ROW_ID).maybeSingle();
+  const data = await fetchQuizP();
   if (data) { quiz = data; handleState(data); }
   refreshCount();
 
   // 【重要】RT通知は不完全な行(questions欠落)で届き得るため、合図としてのみ使いRESTで再取得
   sb.channel('projector-watch')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_state', filter: `id=eq.${QUIZ_ROW_ID}` }, async () => {
-      const { data } = await sb.from('quiz_state').select('*').eq('id', QUIZ_ROW_ID).maybeSingle();
-      if (data && Array.isArray(data.questions)) {
+      const data = await fetchQuizP();
+      if (data) {
         quiz = data;
         handleState(data);
       }
@@ -355,7 +359,7 @@ async function connect() {
   // 画面復帰時に即座に最新状態へ追随
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState !== 'visible') return;
-    const { data } = await sb.from('quiz_state').select('*').eq('id', QUIZ_ROW_ID).maybeSingle();
+    const data = await fetchQuizP();
     if (data && (!quiz || !quiz.updated_at || data.updated_at >= quiz.updated_at)) {
       quiz = data;
       handleState(data);
@@ -365,7 +369,7 @@ async function connect() {
   // リアルタイム通知が届かない環境向けの保険 (2.5秒ごとに状態を再取得)
   // ※ 古いデータで新しい表示(正解発表など)を上書きしないよう updated_at で防御
   setInterval(async () => {
-    const { data } = await sb.from('quiz_state').select('*').eq('id', QUIZ_ROW_ID).maybeSingle();
+    const data = await fetchQuizP();
     if (data && (!quiz || !quiz.updated_at || data.updated_at >= quiz.updated_at)) {
       quiz = data;
       handleState(data);
@@ -387,6 +391,27 @@ async function refreshAnswered() {
 }
 
 // ========== 状態ハンドリング ==========
+// ① 軽量同期: 状態のみポーリングし、写真入りquestionsは配信時に1回だけ取得
+const QUIZ_LIGHT_COLS = 'id, state, current_idx, question_started_at, time_limit, updated_at';
+let questionsCacheP = null;
+let questionsStampP = null;
+
+async function fetchQuizP() {
+  const { data: light, error } = await sb.from('quiz_state').select(QUIZ_LIGHT_COLS).eq('id', QUIZ_ROW_ID).maybeSingle();
+  if (error) { console.error(error); return null; }
+  if (!light) return null;
+  const needQs = light.state !== 'waiting';
+  const freshDist = (light.state === 'ready' && questionsStampP !== light.updated_at);
+  if (needQs && (freshDist || !questionsCacheP)) {
+    const { data: qq, error: e2 } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
+    if (!e2 && qq && Array.isArray(qq.questions)) {
+      questionsCacheP = qq.questions;
+      if (light.state === 'ready') questionsStampP = light.updated_at;
+    }
+  }
+  return Object.assign({}, light, { questions: questionsCacheP || [] });
+}
+
 function handleState(q) {
   if (!q || !Array.isArray(q.questions)) return; // 不完全データ防御
   const key = q.state + ':' + q.current_idx;
@@ -669,8 +694,21 @@ async function showFinishedP() {
     runFinale((FOLLOW && followFinal) ? followFinal : dummyPlayersP(22));
     return;
   }
-  const { data } = await sb.from('players').select('*').order('score', { ascending: false });
-  const arr = (data || []).map(p => ({ id: p.id, name: p.name, score: p.score || 0 }));
+  // ④ 通信不調による誤表示防止: 最大3回リトライ
+  let data = null;
+  for (let i = 0; i < 3; i++) {
+    try {
+      const res = await sb.from('players').select('*').order('score', { ascending: false });
+      if (res.error) throw res.error;
+      data = res.data || [];
+      break;
+    } catch (e) {
+      console.warn('最終結果の取得に失敗 (' + (i + 1) + '/3):', e);
+      await new Promise(r => setTimeout(r, 700));
+    }
+  }
+  if (data === null) { lastKey = null; return; } // ポーリングで自動再試行
+  const arr = data.map(p => ({ id: p.id, name: p.name, score: p.score || 0 }));
   runFinale(arr);
 }
 
@@ -1010,6 +1048,16 @@ window.pTestReset = function() {
 }
 
 // ④ プロジェクター画面が複数開かれていないか監視 (音が二重になる原因)
+function showMutedBadge() {
+  hideAudioHint();
+  if (document.getElementById('muted-badge')) return;
+  const d = document.createElement('div');
+  d.id = 'muted-badge';
+  d.textContent = '🔇 新しいプロジェクター画面が開かれたため、この画面は消音しました (このタブは閉じてOK)';
+  d.style.cssText = 'position:fixed;top:1.5vh;left:50%;transform:translateX(-50%);z-index:2500;font-weight:900;font-size:2vh;padding:1vh 2.5vw;border-radius:999px;background:#555;color:#fff;box-shadow:0 1vh 3vh rgba(0,0,0,.4);max-width:92vw;text-align:center;';
+  document.body.appendChild(d);
+}
+
 function showDupWarn() {
   if (document.getElementById('dup-warn')) return;
   const d = document.createElement('div');
@@ -1027,8 +1075,11 @@ if (!EMBED && 'BroadcastChannel' in window) {
       const m = ev.data || {};
       if (m.tag === myTag) return;
       if (m.type === 'hello') {
+        // ⑤ 新しいプロジェクター画面が開いた → この(古い)画面は自動で消音し、音のダブりを根絶
         dupBc.postMessage({ type: 'here', tag: myTag });
-        showDupWarn();
+        projMuted = true;
+        stopWaitBgm();
+        showMutedBadge();
       } else if (m.type === 'here') {
         showDupWarn();
       }

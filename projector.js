@@ -1,5 +1,5 @@
-// 同期会クイズ v3.0 (2026-07-16) - projector.js
-console.log('同期会クイズ v3.0 (2026-07-16) - projector.js loaded');
+// 同期会クイズ v3.1 (2026-07-16) - projector.js
+console.log('同期会クイズ v3.1 (2026-07-16) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -186,6 +186,19 @@ function playCelebrationFanfare() {
 }
 
 // ⑥ 出題スティング「ジャジャン!」(カウントダウン0の瞬間)
+// ② 正解発表ジングル (クラッシュ+上昇アルペジオ+輝く和音)
+function playRevealJingle() {
+  playCrash(0);
+  const seq = [[523, 0], [659, 110], [784, 220], [1047, 330]];
+  seq.forEach(([f, t]) => setTimeout(() => {
+    playTone(f, 0.22, 'triangle', 0.16);
+    playTone(f / 2, 0.22, 'triangle', 0.08);
+  }, t));
+  setTimeout(() => {
+    [1047, 1319, 1568].forEach(f => playTone(f, 1.1, 'triangle', 0.11));
+  }, 480);
+}
+
 function playQuestionSting() {
   [330, 415, 494].forEach(f => playTone(f, 0.14, 'sawtooth', 0.08));
   setTimeout(() => {
@@ -400,9 +413,9 @@ async function fetchQuizP() {
   const { data: light, error } = await sb.from('quiz_state').select(QUIZ_LIGHT_COLS).eq('id', QUIZ_ROW_ID).maybeSingle();
   if (error) { console.error(error); return null; }
   if (!light) return null;
-  const needQs = light.state !== 'waiting';
+  // ① 待受中でも事前取得してキャッシュを温めておく (第1問の初動を最速化)
   const freshDist = (light.state === 'ready' && questionsStampP !== light.updated_at);
-  if (needQs && (freshDist || !questionsCacheP)) {
+  if (freshDist || !questionsCacheP) {
     const { data: qq, error: e2 } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
     if (!e2 && qq && Array.isArray(qq.questions)) {
       questionsCacheP = qq.questions;
@@ -504,6 +517,7 @@ function showQuestionP(q) {
   if (Date.now() < effStart) {
     showCountdownP(effStart, () => startTimerP(q), isLastQuestion(q));
   } else {
+    playQuestionSting(); // カウントダウンを逃した場合も出題の合図を鳴らす
     startTimerP(q);
   }
 }
@@ -648,10 +662,11 @@ async function revealP(q) {
     }
   });
 
+  playRevealJingle(); // ② 正解発表の効果音 (通信を待たず即発音)
+  fireConfetti();
+
   // 正答率バナー (正解者数 ÷ 参加者数)。取得失敗時は2.5秒後に自動再試行【自己修復】
   updateRateBannerP(q, correct, 0);
-  playFanfare();
-  fireConfetti();
 }
 
 // ========== 途中ランキング ==========

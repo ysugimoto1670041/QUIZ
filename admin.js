@@ -1,5 +1,5 @@
-// 同期会クイズ v3.0 (2026-07-16) - admin.js
-console.log('同期会クイズ v3.0 (2026-07-16) - admin.js loaded');
+// 同期会クイズ v3.1 (2026-07-16) - admin.js
+console.log('同期会クイズ v3.1 (2026-07-16) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -309,9 +309,9 @@ async function getQuiz() {
   const { data: light, error } = await sb.from('quiz_state').select('id, state, current_idx, question_started_at, time_limit, updated_at').eq('id', QUIZ_ROW_ID).maybeSingle();
   if (error) { console.error(error); return null; }
   if (!light) return null;
-  const needQs = light.state !== 'waiting';
+  // ① 待受中でも事前取得してキャッシュを温めておく (第1問の初動を最速化)
   const freshDist = (light.state === 'ready' && adminQsStamp !== light.updated_at);
-  if (needQs && (freshDist || !adminQsCache)) {
+  if (freshDist || !adminQsCache) {
     const { data: qq, error: e2 } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
     if (!e2 && qq && Array.isArray(qq.questions)) {
       adminQsCache = qq.questions;
@@ -349,6 +349,8 @@ window.startQuiz = async function() {
   });
   adminQsCache = useQs;      // ① 自分が配信した内容をそのままキャッシュ
   adminQsStamp = null;
+  distSettleUntil = Date.now() + 3000; // 3秒間「第1問を開始」を待機
+  setTimeout(refreshLive, 3100);
 
   // 経過時間タイマーを開始
   localStorage.setItem('ltcb_quiz_started_at', String(Date.now()));
@@ -453,7 +455,8 @@ window.nextStep = async function() {
 let liveWatchStarted = false;
 let currentLiveQuiz = null;
 let playersCount = 0;
-let adminQsCache = null;   // ① ライブ用の問題キャッシュ (毎回の重い取得を防ぐ)
+let adminQsCache = null;
+let distSettleUntil = 0; // ① 配信直後の待機 (全端末が問題を取得し終える猶予)   // ① ライブ用の問題キャッシュ (毎回の重い取得を防ぐ)
 let adminQsStamp = null;
 function startLiveWatch() {
   if (liveWatchStarted || !sbReady) return;
@@ -510,8 +513,8 @@ async function refreshLive() {
     btn.textContent = (quiz.current_idx + 1 >= (quiz.questions || []).length) ? '🏁 最終成績発表へ' : '▶ 次の質問へ';
   } else if (quiz.state === 'ranking') btn.textContent = '🏆 ランキング表示中';
   else btn.textContent = '✓ 終了しました';
-  // ① クイズスタートが押されるまで「第1問を開始」は無効 (グレーアウト)
-  btn.disabled = (quiz.state === 'waiting');
+  // クイズスタート前、および配信直後3秒(全端末の取得待ち)は無効
+  btn.disabled = (quiz.state === 'waiting') || (quiz.state === 'ready' && Date.now() < distSettleUntil);
 
   // 終了時に経過時間を固定
   if (quiz.state === 'finished') {
@@ -739,10 +742,10 @@ function setupPreviewTabs() {
       pvMode = b.dataset.mode;
       const isTest = pvMode === 'test';
       document.getElementById('preview-frame').src =
-        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=34';
+        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=35';
       // プロジェクターを連動切替 (テスト時は参加者画面に追従する連動テストモード)
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=34' + (isTest ? '&test=1&follow=1' : '');
+        'projector.html?embed=1&v=35' + (isTest ? '&test=1&follow=1' : '');
       setProjTabActive(isTest ? 'test' : 'live');
       if (!isTest) { testBoardRows = []; }
       updateQuestionBoard(currentLiveQuiz);
@@ -761,7 +764,7 @@ function setupPreviewTabs() {
       document.querySelectorAll('.proj-col .pj-tab').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=34' + (b.dataset.mode === 'test' ? '&test=1' : '');
+        'projector.html?embed=1&v=35' + (b.dataset.mode === 'test' ? '&test=1' : '');
     });
   });
   const pjReload = document.querySelector('.proj-col .pj-reload');

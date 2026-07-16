@@ -1,5 +1,5 @@
-// 同期会クイズ v3.0 (2026-07-16) - play.js
-console.log('同期会クイズ v3.0 (2026-07-16) - play.js loaded');
+// 同期会クイズ v3.1 (2026-07-16) - play.js
+console.log('同期会クイズ v3.1 (2026-07-16) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -414,9 +414,9 @@ async function fetchQuiz() {
   if (error) { console.error(error); return null; }
   if (!light) return null;
 
-  const needQs = light.state !== 'waiting';
+  // ① 待受中でも事前取得してキャッシュを温めておく (第1問の初動を最速化)
   const freshDist = (light.state === 'ready' && questionsFetchedStamp !== light.updated_at);
-  if (needQs && (freshDist || !questionsCache)) {
+  if (freshDist || !questionsCache) {
     const { data: qq, error: e2 } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
     if (!e2 && qq && Array.isArray(qq.questions)) {
       questionsCache = qq.questions;
@@ -800,7 +800,7 @@ function showRateBanner(rateStat) {
   if (!rateStat || rateStat.total <= 0) return;
   const b = document.createElement('div');
   b.id = 'rate-banner';
-  b.textContent = `📊 正答率 ${rateStat.rate}% (${rateStat.correctCount}/参加${rateStat.total}人)`;
+  b.textContent = `📊 正答率 ${rateStat.rate}%`;
   const qs = document.getElementById('screen-question');
   qs.insertBefore(b, qs.firstChild);
 }
@@ -819,7 +819,7 @@ function showRevealOverlay(correct, points, isDouble, rateStat) {
       </div>
       ${correct ? `<div class="reveal-points">+${points} pts</div>` : ''}
       ${isDouble ? '<div class="double-badge">🔥 ダブルスコア獲得!!</div>' : ''}
-      ${rateStat && rateStat.total > 0 ? `<div class="reveal-rate">📊 正答率 ${rateStat.rate}% (${rateStat.correctCount}/参加${rateStat.total}人)</div>` : ''}
+      ${rateStat && rateStat.total > 0 ? `<div class="reveal-rate">📊 正答率 ${rateStat.rate}%</div>` : ''}
     </div>
   `;
   document.body.appendChild(overlay);

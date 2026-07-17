@@ -1,5 +1,5 @@
-// 同期会クイズ v3.4.1 (2026-07-17) - projector.js
-console.log('同期会クイズ v3.4.1 (2026-07-17) - projector.js loaded');
+// 同期会クイズ v3.4.2 (2026-07-17) - projector.js
+console.log('同期会クイズ v3.4.2 (2026-07-17) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -206,15 +206,15 @@ function playRevealJingle() {
 
 // ==== ③ MP3効果音・BGM (会場音源) ====
 const SFX_FILES = {
-  qr: 'bgm_qr.mp3',            // ① QRコード待受BGM (ループ)
-  ready: 'bgm_ready.mp3',      // ② READY GO画面BGM (ループ)
+  qr: 'bgm_qr2.mp3',           // ① QRコード待受BGM (ループ)
+  ready: 'bgm_ready2.mp3',     // ② READY GO画面BGM (和太鼓・ループ)
   count10: 'se_countdown10.mp3', // ③ 残り10秒カウントダウン
   timeout: 'se_timeout.mp3',   // ④ タイムアップ
   reveal: 'se_reveal.mp3',     // ⑤ 正解発表
   champion: 'se_champion.mp3'  // ⑥ 優勝者発表
 };
 const sfxPool = {};
-const SFX_VER = '?v=42'; // ③ 曲の差し替えを確実に反映 (ブラウザキャッシュ対策)
+const SFX_VER = '?v=43'; // ③ 曲の差し替えを確実に反映 (ブラウザキャッシュ対策)
 function getSfx(k) {
   let a = sfxPool[k];
   if (!a) { a = new Audio(SFX_FILES[k] + SFX_VER); a.preload = 'auto'; sfxPool[k] = a; }
@@ -227,6 +227,9 @@ function playSfx(k, opts) {
   opts = opts || {};
   if (projMuted) return;
   if (EMBED && !TESTP && !embedSoundOn) return; // ④
+  // ① BGMは同時に1曲のみ (二重再生の構造的防止)
+  if (k === 'qr') stopSfx('ready');
+  if (k === 'ready') stopSfx('qr');
   try {
     const a = getSfx(k);
     a.loop = !!opts.loop;

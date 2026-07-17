@@ -1,5 +1,5 @@
-// 同期会クイズ v3.4.1 (2026-07-17) - admin.js
-console.log('同期会クイズ v3.4.1 (2026-07-17) - admin.js loaded');
+// 同期会クイズ v3.4.2 (2026-07-17) - admin.js
+console.log('同期会クイズ v3.4.2 (2026-07-17) - admin.js loaded');
 // ========== Supabase 初期化 ==========
 let sb = null;
 let sbReady = false;
@@ -398,26 +398,6 @@ window.backToStart = async function() {
   updateElapsed();
 }
 
-// ④ 音源mp3が正しくアップロードされているかの点検
-window.checkSfxFiles = function() {
-  const files = ['bgm_qr.mp3', 'bgm_ready.mp3', 'se_countdown10.mp3', 'se_timeout.mp3', 'se_reveal.mp3', 'se_champion.mp3'];
-  const state = {};
-  files.forEach(f => {
-    state[f] = 'pending';
-    const a = new Audio(f);
-    a.addEventListener('canplaythrough', () => { state[f] = 'ok'; }, { once: true });
-    a.addEventListener('error', () => { state[f] = 'ng'; }, { once: true });
-    a.load();
-  });
-  setTimeout(() => {
-    const missing = files.filter(f => state[f] !== 'ok');
-    alert(missing.length
-      ? '⚠ 読み込めない音源ファイル:\n' + missing.join('\n') + '\n\nGitHubのQUIZ直下にmp3がアップロードされているか確認してください。'
-      : '✅ 音源6ファイルすべて確認できました');
-  }, 6000);
-  alert('音源ファイルを点検中です… 6秒後に結果を表示します');
-};
-
 window.endQuiz = async function() {
   await upsertQuiz({ state: 'finished' });
 }
@@ -790,10 +770,10 @@ function setupPreviewTabs() {
       pvMode = b.dataset.mode;
       const isTest = pvMode === 'test';
       document.getElementById('preview-frame').src =
-        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=42';
+        'play.html?' + (isTest ? 'test=1' : 'preview=1') + '&v=43';
       // プロジェクターを連動切替 (テスト時は参加者画面に追従する連動テストモード)
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=42' + (isTest ? '&test=1&follow=1' : '');
+        'projector.html?embed=1&v=43' + (isTest ? '&test=1&follow=1' : '');
       setProjTabActive(isTest ? 'test' : 'live');
       if (!isTest) { testBoardRows = []; }
       updateQuestionBoard(currentLiveQuiz);
@@ -812,7 +792,7 @@ function setupPreviewTabs() {
       document.querySelectorAll('.proj-col .pj-tab').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       document.getElementById('projector-frame').src =
-        'projector.html?embed=1&v=42' + (b.dataset.mode === 'test' ? '&test=1' : '');
+        'projector.html?embed=1&v=43' + (b.dataset.mode === 'test' ? '&test=1' : '');
     });
   });
   const pjReload = document.querySelector('.proj-col .pj-reload');

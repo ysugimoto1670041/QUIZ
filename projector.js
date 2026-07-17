@@ -1,5 +1,5 @@
-// 同期会クイズ v3.4.2 (2026-07-17) - projector.js
-console.log('同期会クイズ v3.4.2 (2026-07-17) - projector.js loaded');
+// 同期会クイズ v3.4.3 (2026-07-17) - projector.js
+console.log('同期会クイズ v3.4.3 (2026-07-17) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -214,7 +214,7 @@ const SFX_FILES = {
   champion: 'se_champion.mp3'  // ⑥ 優勝者発表
 };
 const sfxPool = {};
-const SFX_VER = '?v=43'; // ③ 曲の差し替えを確実に反映 (ブラウザキャッシュ対策)
+const SFX_VER = '?v=44'; // ③ 曲の差し替えを確実に反映 (ブラウザキャッシュ対策)
 function getSfx(k) {
   let a = sfxPool[k];
   if (!a) { a = new Audio(SFX_FILES[k] + SFX_VER); a.preload = 'auto'; sfxPool[k] = a; }
@@ -244,6 +244,17 @@ function stopSfx(k) {
   if (a) { try { a.pause(); a.currentTime = 0; } catch (e) {} }
 }
 function stopBgmSfx() { stopSfx('qr'); stopSfx('ready'); }
+// READY GO BGM(和太鼓)が止まっていたら再開
+function ensureReadyBgm() {
+  const a = sfxPool['ready'];
+  if (!a || a.paused) playSfx('ready', { loop: true });
+}
+// この画面がBGMを鳴らす時、他のプロジェクター画面(古いタブ含む)へ消音を要求
+function claimBgmOwnership() {
+  try {
+    if (window.__projDupBc) window.__projDupBc.postMessage({ type: 'claim', tag: window.__projTag });
+  } catch (e) {}
+}
 // ③ QR待受BGMが止まっていたら再開 (オールリセット後・復帰後も確実に流す)
 function ensureQrBgm() {
   const a = sfxPool['qr'];
@@ -503,13 +514,19 @@ function handleState(q) {
   if (q.state === 'waiting') {
     stopWaitBgm();
     stopSfx('ready');
-    ensureQrBgm(); // ①③ QR待受BGM (リセット後も確実に再開)
+    if (lastKey !== key) claimBgmOwnership();
+    ensureQrBgm(); // QR待受BGM (リセット後も確実に再開)
     toggleReadyP(false);
     showP('waiting');
   } else if (q.state === 'ready') {
     stopWaitBgm();
-    stopSfx('qr');
-    if (lastKey !== key) playSfx('ready', { loop: true }); // ② READY GO BGM (第1問開始まで)
+    stopSfx('qr'); // READY GO中はQR曲を毎回強制停止 (和太鼓のみが流れる)
+    if (lastKey !== key) {
+      playSfx('ready', { loop: true }); // READY GO BGM=和太鼓 (第1問開始まで)
+      claimBgmOwnership(); // 他ウィンドウ(古いタブ含む)のBGMを止めさせる
+    } else {
+      ensureReadyBgm();
+    }
     toggleReadyP(true);
     showP('waiting');
   } else if (q.state === 'question') {

@@ -1,5 +1,5 @@
-// 同期会クイズ v3.3.3 (2026-07-16) - projector.js
-console.log('同期会クイズ v3.3.3 (2026-07-16) - projector.js loaded');
+// 同期会クイズ v3.4 (2026-07-16) - projector.js
+console.log('同期会クイズ v3.4 (2026-07-16) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -70,6 +70,7 @@ function hideAudioHint() {
   const b = document.getElementById('audio-hint');
   if (b) b.remove();
 }
+let revealedIdxP = -1; // ① 発表済みの問題 (ランキング往復での再演出防止)
 let projMuted = false;            // 多重起動検知時の自動消音フラグ
 let embedSoundOn = false;         // ④ 埋込ライブプレビューが音源を担うか
 let lastStandaloneAlive = 0;      // ④ 単独プロジェクターウィンドウの生存確認
@@ -546,6 +547,7 @@ function effectiveStart(q) {
 
 // ========== 出題表示 ==========
 function showQuestionP(q) {
+  revealedIdxP = -1; // ① 新しい問題では再び発表演出を許可
   const idx = q.current_idx;
   const question = q.questions[idx];
   if (!question) return;
@@ -744,9 +746,14 @@ async function revealP(q) {
     }
   });
 
-  stopSfx('count10');
-  playSfx('reveal'); // ⑤ 正解発表 (mp3)
-  fireConfetti();
+  const alreadyRevealed = (revealedIdxP === q.current_idx);
+  revealedIdxP = q.current_idx;
+  if (!alreadyRevealed) {
+    // ① 初回の発表のみ効果音と紙吹雪 (ランキングから戻った時は静かに復元)
+    stopSfx('count10');
+    playSfx('reveal');
+    fireConfetti();
+  }
 
   // 正答率バナー (正解者数 ÷ 参加者数)。取得失敗時は2.5秒後に自動再試行【自己修復】
   updateRateBannerP(q, correct, 0);

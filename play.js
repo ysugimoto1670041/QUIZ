@@ -1,5 +1,5 @@
-// 同期会クイズ v3.3.3 (2026-07-16) - play.js
-console.log('同期会クイズ v3.3.3 (2026-07-16) - play.js loaded');
+// 同期会クイズ v3.4 (2026-07-16) - play.js
+console.log('同期会クイズ v3.4 (2026-07-16) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -42,6 +42,7 @@ let currentQuiz = null;
 let lastState = null;
 let timerInterval = null;
 let timerDoneKey = null; // タイムアップ済みの問題キー (鐘の繰り返し防止)
+let lastRevealCache = null; // ① 発表済み結果 (ランキングから戻った時の復元用)
 let countdownInterval = null;
 let mySelected = -1;
 let finaleRunning = false;
@@ -779,7 +780,14 @@ async function revealAnswer(q) {
 
   if (PREVIEW) return;
 
-  if (revealedRounds.has(idx)) return;
+  if (revealedRounds.has(idx)) {
+    // ① ランキング表示から戻った場合: 演出を繰り返さず、結果ピルだけを静かに復元
+    //    (正解ハイライトはこの関数の冒頭で再適用済み)
+    if (lastRevealCache && lastRevealCache.idx === idx && !document.getElementById('reveal-overlay')) {
+      showRevealOverlay(lastRevealCache.myCorrect, lastRevealCache.pts, lastRevealCache.dbl, lastRevealCache.rateStat, true);
+    }
+    return;
+  }
   revealedRounds.add(idx);
 
   // 回答データの取得。失敗した場合はロックを解除し、
@@ -821,6 +829,7 @@ async function revealAnswer(q) {
     if (isLast) myPointsThisRound *= 2; // 最終問題はダブルスコア
   }
 
+  lastRevealCache = { idx, myCorrect, pts: myPointsThisRound, dbl: isLast && myCorrect, rateStat };
   showRevealOverlay(myCorrect, myPointsThisRound, isLast && myCorrect, rateStat);
 
   if (myCorrect && myPointsThisRound > 0) {
@@ -843,12 +852,13 @@ function showRateBanner(rateStat) {
   qs.insertBefore(b, qs.firstChild);
 }
 
-function showRevealOverlay(correct, points, isDouble, rateStat) {
+function showRevealOverlay(correct, points, isDouble, rateStat, instantStay) {
   const existing = document.getElementById('reveal-overlay');
   if (existing) existing.remove();
   const overlay = document.createElement('div');
   overlay.id = 'reveal-overlay';
   overlay.classList.add('flash-bg');
+  if (instantStay) overlay.classList.add('stay'); // ① 復元表示: 演出なしで常駐ピルから開始
   overlay.innerHTML = `
     <div class="reveal-content">
       <div class="reveal-emoji">${correct ? '🎉' : '😢'}</div>
@@ -869,10 +879,12 @@ function showRevealOverlay(correct, points, isDouble, rateStat) {
     playWrong();
   }
 
-  // ⑤ 2.2秒後に消さず、上部のコンパクト表示に変形して次の問題まで残す
-  setTimeout(() => {
-    overlay.classList.add('stay');
-  }, 2200);
+  // 2.2秒後に消さず、上部のコンパクト表示に変形して次の問題まで残す
+  if (!instantStay) {
+    setTimeout(() => {
+      overlay.classList.add('stay');
+    }, 2200);
+  }
 }
 
 function clearRevealPill() {
@@ -1383,6 +1395,7 @@ window.testReset = function() {
   removeFinale();
   clearRevealPill();
   revealedRounds.clear();
+  lastRevealCache = null;
   currentQuiz = loadTestQuiz();
   mySelected = -1;
   lastState = null;

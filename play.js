@@ -1,5 +1,5 @@
-// 同期会クイズ v3.4 (2026-07-16) - play.js
-console.log('同期会クイズ v3.4 (2026-07-16) - play.js loaded');
+// 同期会クイズ v3.4.1 (2026-07-17) - play.js
+console.log('同期会クイズ v3.4.1 (2026-07-17) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -872,7 +872,8 @@ function showRevealOverlay(correct, points, isDouble, rateStat, instantStay) {
   `;
   document.body.appendChild(overlay);
 
-  if (correct) {
+  if (correct && !instantStay) {
+    // ② ランキングから戻った復元表示では紙吹雪や演出を繰り返さない
     playFanfareCorrect();
     fireConfetti();
   } else {

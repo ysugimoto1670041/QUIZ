@@ -1,5 +1,5 @@
-// 同期会クイズ v3.4.4 (2026-10-14) - play.js
-console.log('同期会クイズ v3.4.4 (2026-10-14) - play.js loaded');
+// 同期会クイズ v3.4.6 (2026-10-14) - play.js
+console.log('同期会クイズ v3.4.6 (2026-10-14) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -45,6 +45,9 @@ let timerDoneKey = null; // タイムアップ済みの問題キー (鐘の繰�
 let lastRevealCache = null; // ① 発表済み結果 (ランキングから戻った時の復元用)
 let countdownInterval = null;
 let mySelected = -1;
+let mySelectedIdx = -1;      // v3.4.6: mySelected がどの問題への回答か
+let mySubmitPromise = null;  // v3.4.6: 送信中の回答 (発表時に保存完了を待つ)
+let myLastRow = null;        // v3.4.6: 最後に送った自分の回答 (保存し直し用)
 let finaleRunning = false;
 const revealedRounds = new Set();
 
@@ -92,6 +95,45 @@ function learnClockOffset(light, issuedAt, receivedAt) {
   lastFetchIssuedAt = issuedAt;
   lastFetchKey = key;
   lastFetchStamp = stamp;
+}
+
+// v3.4.6: 問題データの照合
+// 問題データは一度取り込んだら使い回すため、取り込み直しの機会を逃すと古い問題のまま進んでしまう
+// (正解の選択肢がスクリーンとずれ、正解でも不正解と判定される)。
+// そこで出題時・発表時に、データベース上の「その問題」の文面と正解番号だけを軽く取り寄せて照合し、
+// ずれていれば問題データ全体を取り込み直す。正誤判定は常にデータベースの正解番号で行う。
+let verifiedKey = null;
+function qFingerprint(q) {
+  if (!q) return '';
+  const ch = q.choices || [];
+  return JSON.stringify([q.text || '', q.correct, [0, 1, 2, 3].map(i => (ch[i] && ch[i].text) || '')]);
+}
+async function verifyCurrentQuestion(light) {
+  const idx = light.current_idx;
+  if (!(light.state === 'question' || light.state === 'answer') || idx < 0) return;
+  const key = light.state + ':' + idx + ':' + (light.question_started_at || 0);
+  if (verifiedKey === key) return;
+  try {
+    const p = 'questions->' + idx;
+    const sel = `qt:${p}->>text,qc:${p}->correct,c0:${p}->choices->0->>text,c1:${p}->choices->1->>text,c2:${p}->choices->2->>text,c3:${p}->choices->3->>text`;
+    const { data: v, error } = await sb.from('quiz_state').select(sel).eq('id', QUIZ_ROW_ID).maybeSingle();
+    if (error || !v) return; // 照合できない時は次の取得で再試行
+    const dbFp = JSON.stringify([v.qt || '', v.qc, [v.c0 || '', v.c1 || '', v.c2 || '', v.c3 || '']]);
+    if (dbFp !== qFingerprint((questionsCache || [])[idx])) {
+      console.log('[問題照合] 第' + (idx + 1) + '問の手元データが古いため取り込み直します');
+      const { data: qq, error: e2 } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
+      if (!e2 && qq && Array.isArray(qq.questions)) {
+        questionsCache = qq.questions;
+        questionsFetchedStamp = null;
+      } else if (questionsCache && questionsCache[idx]) {
+        // 全体の取り込みに失敗しても、正解番号と文面だけは最新に合わせる
+        questionsCache[idx] = Object.assign({}, questionsCache[idx], { text: v.qt, correct: v.qc });
+      } else {
+        return;
+      }
+    }
+    verifiedKey = key;
+  } catch (e) { console.warn('問題照合に失敗 (次回再試行):', e); }
 }
 
 function effectiveStart(q) {
@@ -472,6 +514,7 @@ async function fetchQuiz() {
       finally { fetchQuiz._bg = false; }
     })();
   }
+  if (questionsCache) await verifyCurrentQuestion(light); // v3.4.6: 出題・発表時に問題データを照合
   return Object.assign({}, light, { questions: questionsCache || [] });
 }
 
@@ -547,7 +590,8 @@ function handleStateChange(q) {
   } else if (state === 'question') {
     stopWaitBgm();
     if (lastState !== stateKey) {
-      mySelected = -1;
+      // v3.4.6: 新しい問題の時だけ回答をリセット (同じ問題の再表示では答えを消さない)
+      if (mySelectedIdx !== q.current_idx) { mySelected = -1; mySelectedIdx = q.current_idx; mySubmitPromise = null; }
       if (PREVIEW) {
         // ④ 管理画面プレビューはPC側なので0.6秒遅らせてスマホと表示開始を揃える
         const qq = q;
@@ -607,6 +651,10 @@ function showQuestion(q) {
   `).join('');
 
   document.getElementById('answered-status').classList.add('hidden');
+  if (mySelected >= 0 && mySelectedIdx === idx) {
+    // v3.4.6: 同じ問題の再表示 → 選んだ答えを復元し、二重回答を防ぐ
+    choicesEl.querySelectorAll('.choice').forEach((el, i2) => { el.disabled = true; if (i2 === mySelected) el.classList.add('selected'); });
+  }
   timerDoneKey = null; // 新しい問題でリセット
 
   // 投票数表示の状態を初期化
@@ -751,6 +799,7 @@ window.selectAnswer = function(i) {
   if (mySelected >= 0) return;
   if (!currentQuiz || currentQuiz.state !== 'question') return;
   mySelected = i;
+  mySelectedIdx = currentQuiz.current_idx;
   playSelect();
 
   document.querySelectorAll('.choice').forEach((el, idx) => {
@@ -775,15 +824,21 @@ async function submitAnswer(i) {
     return;
   }
 
-  const { error } = await sb.from('answers').upsert({
-    q_idx: idx,
-    player_id: myId,
-    choice: i,
-    elapsed_ms: elapsedMs,
-    name: myName
-  }, { onConflict: 'q_idx,player_id' });
-
-  if (error) console.error(error);
+  const row = { q_idx: idx, player_id: myId, choice: i, elapsed_ms: elapsedMs, name: myName };
+  // v3.4.6: 時間切れの「未回答(-1)」は既存の回答を上書きしない (ON CONFLICT DO NOTHING)
+  const opts = (i < 0) ? { onConflict: 'q_idx,player_id', ignoreDuplicates: true } : { onConflict: 'q_idx,player_id' };
+  const send = async () => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { error } = await sb.from('answers').upsert(row, opts);
+      if (!error) return true;
+      console.error('回答の保存に失敗 (' + (attempt + 1) + '/3):', error);
+      await new Promise(r => setTimeout(r, 600));
+    }
+    return false;
+  };
+  const p = send();
+  if (i >= 0) { mySubmitPromise = p; myLastRow = row; }
+  return p;
 }
 
 // ========== 回答発表 ==========
@@ -826,6 +881,10 @@ async function revealAnswer(q) {
   // ※ スマホのスリープ復帰直後などは最初の通信が失敗しやすいため
   let ans = null;
   let pCount = 0;
+  // v3.4.6: 自分の回答がまだ送信中なら、保存完了を待ってから集計する (最大4秒)
+  if (mySubmitPromise && mySelectedIdx === idx) {
+    try { await Promise.race([mySubmitPromise, new Promise(r => setTimeout(r, 4000))]); } catch (e) {}
+  }
   try {
     const { data: answers, error } = await sb.from('answers').select('*').eq('q_idx', idx);
     if (error) throw error;
@@ -833,16 +892,29 @@ async function revealAnswer(q) {
   } catch (e) {
     console.warn('結果データの取得に失敗。自動再試行します:', e);
     revealedRounds.delete(idx); // ロック解除
-    lastState = null;           // 次のポーリングで再突入させる
+    // v3.4.6: まだこの問題の発表中の時だけ再突入させる (次の問題の進行を乱さない)
+    if (currentQuiz && currentQuiz.state === 'answer' && currentQuiz.current_idx === idx) lastState = null;
     return;
   }
   try {
     const { data: allPlayers } = await sb.from('players').select('id');
     pCount = (allPlayers || []).length;
   } catch (e) { console.warn('参加者数の取得に失敗 (正答率なしで続行):', e); }
+  // v3.4.6: 手元で選んだ答えがあれば、データベースの記録より優先して自分の判定に使う
+  if (mySelected >= 0 && mySelectedIdx === idx) {
+    const mine = ans.find(a => a.player_id === myId);
+    if (!mine || mine.choice !== mySelected) {
+      console.warn('[判定] 自分の回答がデータベースに未反映のため手元の回答で判定します');
+      const row = (myLastRow && myLastRow.q_idx === idx && myLastRow.choice === mySelected)
+        ? myLastRow
+        : { q_idx: idx, player_id: myId, choice: mySelected, elapsed_ms: (q.time_limit || 15) * 1000, name: myName };
+      ans = ans.filter(a => a.player_id !== myId).concat([row]);
+      sb.from('answers').upsert(row, { onConflict: 'q_idx,player_id' }).then(() => {}, () => {}); // 念のため保存し直す
+    }
+  }
   const allCorrect = ans.filter(a => a.choice === correct);
   const myAns = ans.find(a => a.player_id === myId);
-  const myCorrect = myAns && myAns.choice === correct;
+  const myCorrect = !!(myAns && myAns.choice === correct);
   // 正答率 = 正解者数 ÷ 参加者数 (無回答も「はずれ」扱い)
   const rateStat = {
     total: pCount,

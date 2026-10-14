@@ -1,5 +1,5 @@
-// 同期会クイズ v3.4.4 (2026-10-14) - projector.js
-console.log('同期会クイズ v3.4.4 (2026-10-14) - projector.js loaded');
+// 同期会クイズ v3.4.6 (2026-10-14) - projector.js
+console.log('同期会クイズ v3.4.6 (2026-10-14) - projector.js loaded');
 // ========== プロジェクター表示ロジック ==========
 const QUIZ_ROW_ID = 1;
 const COUNTDOWN_MS = 5500;      // 通常: ディレイ吸収2.5秒 + 3・2・1
@@ -214,7 +214,7 @@ const SFX_FILES = {
   champion: 'se_champion.mp3'  // ⑥ 優勝者発表
 };
 const sfxPool = {};
-const SFX_VER = '?v=45'; // ③ 曲の差し替えを確実に反映 (ブラウザキャッシュ対策)
+const SFX_VER = '?v=47'; // ③ 曲の差し替えを確実に反映 (ブラウザキャッシュ対策)
 function getSfx(k) {
   let a = sfxPool[k];
   if (!a) { a = new Audio(SFX_FILES[k] + SFX_VER); a.preload = 'auto'; sfxPool[k] = a; }
@@ -251,9 +251,17 @@ function ensureReadyBgm() {
 }
 // この画面がBGMを鳴らす時、他のプロジェクター画面(古いタブ含む)へ消音を要求
 function claimBgmOwnership() {
+  // v3.4.5: 消音中の画面は主張しない (相互に消音し合って全画面が無音になるのを防ぐ)
+  if (projMuted || !window.__projArmed) return;
   try {
-    if (window.__projDupBc) window.__projDupBc.postMessage({ type: 'claim', tag: window.__projTag });
+    if (window.__projDupBc) window.__projDupBc.postMessage({ type: 'claim', tag: window.__projTag, born: window.__projBorn });
   } catch (e) {}
+}
+// v3.4.5: 相手の主張が自分より新しいか (新しい画面が勝つ。同時刻はタグで決着)
+function isNewerClaim(m) {
+  const mine = window.__projBorn || 0, theirs = m.born || 0;
+  if (theirs !== mine) return theirs > mine;
+  return String(m.tag) > String(window.__projTag);
 }
 // ③ QR待受BGMが止まっていたら再開 (オールリセット後・復帰後も確実に流す)
 function ensureQrBgm() {
@@ -473,6 +481,40 @@ const QUIZ_LIGHT_COLS = 'id, state, current_idx, question_started_at, time_limit
 let questionsCacheP = null;
 let questionsStampP = null;
 
+// v3.4.6: 問題データの照合 (スマホと同じ仕組み。出題・発表時にデータベースの問題と照合し、ずれていれば取り込み直す)
+let verifiedKeyP = null;
+function qFingerprintP(q) {
+  if (!q) return '';
+  const ch = q.choices || [];
+  return JSON.stringify([q.text || '', q.correct, [0, 1, 2, 3].map(i => (ch[i] && ch[i].text) || '')]);
+}
+async function verifyCurrentQuestionP(light) {
+  const idx = light.current_idx;
+  if (!(light.state === 'question' || light.state === 'answer') || idx < 0) return;
+  const key = light.state + ':' + idx + ':' + (light.question_started_at || 0);
+  if (verifiedKeyP === key) return;
+  try {
+    const p = 'questions->' + idx;
+    const sel = `qt:${p}->>text,qc:${p}->correct,c0:${p}->choices->0->>text,c1:${p}->choices->1->>text,c2:${p}->choices->2->>text,c3:${p}->choices->3->>text`;
+    const { data: v, error } = await sb.from('quiz_state').select(sel).eq('id', QUIZ_ROW_ID).maybeSingle();
+    if (error || !v) return;
+    const dbFp = JSON.stringify([v.qt || '', v.qc, [v.c0 || '', v.c1 || '', v.c2 || '', v.c3 || '']]);
+    if (dbFp !== qFingerprintP((questionsCacheP || [])[idx])) {
+      console.log('[問題照合] 第' + (idx + 1) + '問の手元データが古いため取り込み直します');
+      const { data: qq, error: e2 } = await sb.from('quiz_state').select('questions').eq('id', QUIZ_ROW_ID).maybeSingle();
+      if (!e2 && qq && Array.isArray(qq.questions)) {
+        questionsCacheP = qq.questions;
+        questionsStampP = null;
+      } else if (questionsCacheP && questionsCacheP[idx]) {
+        questionsCacheP[idx] = Object.assign({}, questionsCacheP[idx], { text: v.qt, correct: v.qc });
+      } else {
+        return;
+      }
+    }
+    verifiedKeyP = key;
+  } catch (e) { console.warn('問題照合に失敗 (次回再試行):', e); }
+}
+
 async function fetchQuizP() {
   const { data: light, error } = await sb.from('quiz_state').select(QUIZ_LIGHT_COLS).eq('id', QUIZ_ROW_ID).maybeSingle();
   if (error) { console.error(error); return null; }
@@ -503,6 +545,7 @@ async function fetchQuizP() {
       finally { fetchQuizP._bg = false; }
     })();
   }
+  if (questionsCacheP) await verifyCurrentQuestionP(light); // v3.4.6
   return Object.assign({}, light, { questions: questionsCacheP || [] });
 }
 
@@ -1181,7 +1224,9 @@ function showMutedBadge() {
     const b = document.getElementById('reclaim-btn');
     if (b) b.onclick = () => {
       projMuted = false;
-      try { if (window.__projDupBc) window.__projDupBc.postMessage({ type: 'claim', tag: window.__projTag }); } catch (e) {}
+      window.__projArmed = true;
+      window.__projBorn = Date.now(); // 取り戻した画面を最新扱いにして優先させる
+      claimBgmOwnership();
       const x = document.getElementById('muted-badge'); if (x) x.remove();
       try { getAudioCtx().resume(); } catch (e) {}
       preloadSfx();
@@ -1207,30 +1252,34 @@ if (!EMBED && 'BroadcastChannel' in window) {
     const myTag = Math.random().toString(36).slice(2);
     window.__projDupBc = dupBc;
     window.__projTag = myTag;
+    window.__projBorn = 0;      // クリックして音を出せる状態になった時刻 (音源の優先順位)
+    window.__projArmed = false; // クリック前は音源を名乗らない
     dupBc.onmessage = (ev) => {
       const m = ev.data || {};
       if (m.tag === myTag) return;
       if (m.type === 'hello') {
-        // 新しいプロジェクター画面が開いた → この(古い)画面は自動で消音
+        // 新しいプロジェクター画面が開いた。まだクリック前なので音は譲らない
+        // (譲るのは相手がクリックして claim を送ってきた時)
         dupBc.postMessage({ type: 'here', tag: myTag });
-        projMuted = true;
-        stopWaitBgm();
-        stopBgmSfx();
-        showMutedBadge();
       } else if (m.type === 'here') {
         showDupWarn();
       } else if (m.type === 'claim') {
-        // ④ 他の画面が音源を取り戻した
-        projMuted = true;
-        stopWaitBgm();
-        stopBgmSfx();
-        showMutedBadge();
+        if (isNewerClaim(m)) {
+          // より新しい画面が音源になった → この画面は消音
+          projMuted = true;
+          stopWaitBgm();
+          stopBgmSfx();
+          showMutedBadge();
+        } else if (!projMuted && window.__projArmed) {
+          // 古い画面からの主張 → こちらが音源であることを返して相手を消音させる
+          dupBc.postMessage({ type: 'claim', tag: myTag, born: window.__projBorn });
+        }
       }
     };
     dupBc.postMessage({ type: 'hello', tag: myTag });
     // ④ 生存ビーコン (埋込プレビューが単独ウィンドウの有無を判断できるように)
     setInterval(() => {
-      try { if (!projMuted) dupBc.postMessage({ type: 'alive', tag: myTag }); } catch (e) {}
+      try { if (!projMuted && window.__projArmed) dupBc.postMessage({ type: 'alive', tag: myTag }); } catch (e) {}
     }, 2000);
   } catch (e) {}
 }
@@ -1275,7 +1324,8 @@ if (EMBED && !TESTP && 'BroadcastChannel' in window) {
     const embedBc = new BroadcastChannel('ltcb-proj-live');
     embedBc.onmessage = (ev) => {
       const m = ev.data || {};
-      if (m.type === 'alive' || m.type === 'hello' || m.type === 'here' || m.type === 'claim') {
+      // v3.4.5: クリック済みで音を出せる単独画面(alive/claim)にだけ音を譲る
+      if (m.type === 'alive' || m.type === 'claim') {
         lastStandaloneAlive = Date.now();
         if (embedSoundOn) {
           // 単独プロジェクターウィンドウに音を譲る
@@ -1328,6 +1378,10 @@ document.addEventListener('DOMContentLoaded', () => {
     getAudioCtx();
     startAudioWatchdog();
     preloadSfx();
+    // v3.4.5: クリックした画面が音源になる (他の画面は消音)
+    window.__projArmed = true;
+    window.__projBorn = Date.now();
+    claimBgmOwnership();
     try { await document.documentElement.requestFullscreen(); } catch (e) {}
     if (TESTP && FOLLOW) setupFollowP();
     else if (TESTP) setupTestP();

@@ -1,0 +1,67 @@
+# ============================================================
+# Supabase 自動アクセス (無料プランの7日停止を防ぐ)
+#  - 毎週 月曜・木曜 の朝9時ごろ(日本時間)に、Supabaseへ軽い読み取りを1回行う
+#  - 期限 EXPIRE_DATE を過ぎると何もせず、このワークフロー自体を自動で無効化する
+#  - アクセスに失敗した(=停止中など)場合は実行が「失敗」になり、GitHubから通知メールが届く
+# 置き場所: リポジトリの .github/workflows/supabase-keepalive.yml
+# ============================================================
+name: Supabase keepalive
+
+on:
+  schedule:
+    - cron: '17 0 * * 1,4'   # UTC 0:17 = 日本時間 9:17 (月・木)
+  workflow_dispatch:          # Actions画面の「Run workflow」で手動実行もできる
+
+permissions:
+  contents: read
+  actions: write              # 期限切れ時に自分自身を無効化するため
+
+env:
+  EXPIRE_DATE: '2026-11-15'   # この日付を過ぎたら停止 (日本時間で判定)
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 期限チェック
+        id: expiry
+        run: |
+          today=$(TZ=Asia/Tokyo date +%F)
+          echo "今日(日本時間): $today / 期限: $EXPIRE_DATE"
+          if [[ "$today" > "$EXPIRE_DATE" ]]; then
+            echo "expired=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::期限($EXPIRE_DATE)を過ぎたため自動アクセスを終了します"
+          else
+            echo "expired=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 期限切れ → このワークフローを無効化
+        if: steps.expiry.outputs.expired == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow disable "${{ github.workflow }}" --repo "${{ github.repository }}"
+
+      - name: リポジトリを取得
+        if: steps.expiry.outputs.expired == 'false'
+        uses: actions/checkout@v4
+
+      - name: Supabaseへアクセス
+        if: steps.expiry.outputs.expired == 'false'
+        run: |
+          # 接続先は supabase-config.js から読み取る (このファイルは公開ページで既に公開済みの値)
+          url=$(grep -oE 'https://[a-z0-9]+\.supabase\.co' supabase-config.js | head -1)
+          key=$(grep -oE 'eyJ[A-Za-z0-9._-]+|sb_publishable_[A-Za-z0-9_-]+' supabase-config.js | head -1)
+          if [[ -z "$url" || -z "$key" ]]; then
+            echo "::error::supabase-config.js から接続先を読み取れませんでした"
+            exit 1
+          fi
+          code=$(curl -s -o /tmp/res.json -w '%{http_code}' \
+            -H "apikey: $key" -H "Authorization: Bearer $key" \
+            "$url/rest/v1/quiz_state?select=id&id=eq.1")
+          echo "HTTP $code"
+          if [[ "$code" != "200" ]]; then
+            echo "::error::Supabaseにアクセスできません (HTTP $code)。ダッシュボードでプロジェクトが停止していないか確認してください"
+            exit 1
+          fi
+          echo "OK: Supabaseは稼働中です"

@@ -1,5 +1,5 @@
-// 同期会クイズ v3.4.6 (2026-10-14) - play.js
-console.log('同期会クイズ v3.4.6 (2026-10-14) - play.js loaded');
+// 同期会クイズ v3.4.7 (2026-10-14) - play.js
+console.log('同期会クイズ v3.4.7 (2026-10-14) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -45,9 +45,7 @@ let timerDoneKey = null; // タイムアップ済みの問題キー (鐘の繰�
 let lastRevealCache = null; // ① 発表済み結果 (ランキングから戻った時の復元用)
 let countdownInterval = null;
 let mySelected = -1;
-let mySelectedIdx = -1;      // v3.4.6: mySelected がどの問題への回答か
-let mySubmitPromise = null;  // v3.4.6: 送信中の回答 (発表時に保存完了を待つ)
-let myLastRow = null;        // v3.4.6: 最後に送った自分の回答 (保存し直し用)
+let mySelectedIdx = -1;      // mySelected がどの問題への回答か
 let finaleRunning = false;
 const revealedRounds = new Set();
 
@@ -87,9 +85,9 @@ function learnClockOffset(light, issuedAt, receivedAt) {
                  lastFetchIssuedAt > 0 && (receivedAt - lastFetchIssuedAt) <= 3000; // 推定誤差を±1.5秒以内に限定
   if (prompt && light.question_started_at) {
     // 出題は「前回の取得送信後」かつ「今回の応答受信前」に起きた → その中間を出題時刻と推定
-    const localStart = (lastFetchIssuedAt + receivedAt) / 2;
-    const measured = light.question_started_at - localStart;
-    clockOffsetMs = Math.abs(measured) > CLOCK_TOLERANCE_MS ? measured : 0;
+    const localStart = Math.round((lastFetchIssuedAt + receivedAt) / 2);
+    const measured = Math.round(light.question_started_at - localStart);
+    clockOffsetMs = Math.abs(measured) > CLOCK_TOLERANCE_MS ? measured : 0; // 必ず整数
     if (clockOffsetMs) console.log('[時計補正] 管理画面との時計差 ' + Math.round(clockOffsetMs / 100) / 10 + '秒 を補正');
   }
   lastFetchIssuedAt = issuedAt;
@@ -591,7 +589,7 @@ function handleStateChange(q) {
     stopWaitBgm();
     if (lastState !== stateKey) {
       // v3.4.6: 新しい問題の時だけ回答をリセット (同じ問題の再表示では答えを消さない)
-      if (mySelectedIdx !== q.current_idx) { mySelected = -1; mySelectedIdx = q.current_idx; mySubmitPromise = null; }
+      if (mySelectedIdx !== q.current_idx) { mySelected = -1; mySelectedIdx = q.current_idx; }
       if (PREVIEW) {
         // ④ 管理画面プレビューはPC側なので0.6秒遅らせてスマホと表示開始を揃える
         const qq = q;
@@ -814,7 +812,7 @@ async function submitAnswer(i) {
   const idx = currentQuiz.current_idx;
   const startedAt = effectiveStart(currentQuiz);
   const limit = (currentQuiz.time_limit || 15) * 1000;
-  const elapsedMs = (i < 0) ? limit : Math.max(0, Date.now() - startedAt);
+  const elapsedMs = (i < 0) ? limit : Math.max(0, Math.round(Date.now() - startedAt)); // 必ず整数
 
   if (TEST) {
     testChoice = i;
@@ -836,9 +834,7 @@ async function submitAnswer(i) {
     }
     return false;
   };
-  const p = send();
-  if (i >= 0) { mySubmitPromise = p; myLastRow = row; }
-  return p;
+  return send();
 }
 
 // ========== 回答発表 ==========
@@ -881,10 +877,6 @@ async function revealAnswer(q) {
   // ※ スマホのスリープ復帰直後などは最初の通信が失敗しやすいため
   let ans = null;
   let pCount = 0;
-  // v3.4.6: 自分の回答がまだ送信中なら、保存完了を待ってから集計する (最大4秒)
-  if (mySubmitPromise && mySelectedIdx === idx) {
-    try { await Promise.race([mySubmitPromise, new Promise(r => setTimeout(r, 4000))]); } catch (e) {}
-  }
   try {
     const { data: answers, error } = await sb.from('answers').select('*').eq('q_idx', idx);
     if (error) throw error;
@@ -892,26 +884,13 @@ async function revealAnswer(q) {
   } catch (e) {
     console.warn('結果データの取得に失敗。自動再試行します:', e);
     revealedRounds.delete(idx); // ロック解除
-    // v3.4.6: まだこの問題の発表中の時だけ再突入させる (次の問題の進行を乱さない)
-    if (currentQuiz && currentQuiz.state === 'answer' && currentQuiz.current_idx === idx) lastState = null;
+    lastState = null;           // 次のポーリングで再突入させる
     return;
   }
   try {
     const { data: allPlayers } = await sb.from('players').select('id');
     pCount = (allPlayers || []).length;
   } catch (e) { console.warn('参加者数の取得に失敗 (正答率なしで続行):', e); }
-  // v3.4.6: 手元で選んだ答えがあれば、データベースの記録より優先して自分の判定に使う
-  if (mySelected >= 0 && mySelectedIdx === idx) {
-    const mine = ans.find(a => a.player_id === myId);
-    if (!mine || mine.choice !== mySelected) {
-      console.warn('[判定] 自分の回答がデータベースに未反映のため手元の回答で判定します');
-      const row = (myLastRow && myLastRow.q_idx === idx && myLastRow.choice === mySelected)
-        ? myLastRow
-        : { q_idx: idx, player_id: myId, choice: mySelected, elapsed_ms: (q.time_limit || 15) * 1000, name: myName };
-      ans = ans.filter(a => a.player_id !== myId).concat([row]);
-      sb.from('answers').upsert(row, { onConflict: 'q_idx,player_id' }).then(() => {}, () => {}); // 念のため保存し直す
-    }
-  }
   const allCorrect = ans.filter(a => a.choice === correct);
   const myAns = ans.find(a => a.player_id === myId);
   const myCorrect = !!(myAns && myAns.choice === correct);

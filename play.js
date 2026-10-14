@@ -1,5 +1,5 @@
-// 同期会クイズ v3.4.3 (2026-07-17) - play.js
-console.log('同期会クイズ v3.4.3 (2026-07-17) - play.js loaded');
+// 同期会クイズ v3.4.4 (2026-10-14) - play.js
+console.log('同期会クイズ v3.4.4 (2026-10-14) - play.js loaded');
 // ========== モード判定 ==========
 const _params = new URLSearchParams(location.search);
 const PREVIEW = _params.has('preview');
@@ -65,8 +65,37 @@ function broadcastTestState() {
   });
 }
 
+// v3.4.4: 端末の時計ズレ補正
+// 出題時刻は管理画面(MacBook)の時計で記録される。スマホの時計とずれていると
+// 秒読みが短縮・省略され、スクリーンより先に問題が見えてしまう。
+// そこで「直前の取得では旧状態、今回の取得で新しい問題」と分かった瞬間に、
+// この端末の時計で出題時刻を推定し、管理画面の時計との差(clockOffsetMs)を学習する。
+let clockOffsetMs = 0;       // 管理画面の時計 − この端末の時計 (ms)
+let lastFetchIssuedAt = 0;   // 直前に成功した取得の送信時刻 (この端末の時計)
+let lastFetchKey = null;     // 直前に成功した取得の状態キー
+let lastFetchStamp = '';     // 直前に成功した取得の updated_at
+const CLOCK_TOLERANCE_MS = 1500; // これ以下のズレは推定誤差とみなし補正しない
+
+function learnClockOffset(light, issuedAt, receivedAt) {
+  const key = light.state + ':' + light.current_idx;
+  const stamp = light.updated_at || '';
+  if (stamp && lastFetchStamp && stamp < lastFetchStamp) return; // 追い越された古い応答は無視
+  const prompt = light.state === 'question' && lastFetchKey !== null && lastFetchKey !== key &&
+                 lastFetchIssuedAt > 0 && (receivedAt - lastFetchIssuedAt) <= 3000; // 推定誤差を±1.5秒以内に限定
+  if (prompt && light.question_started_at) {
+    // 出題は「前回の取得送信後」かつ「今回の応答受信前」に起きた → その中間を出題時刻と推定
+    const localStart = (lastFetchIssuedAt + receivedAt) / 2;
+    const measured = light.question_started_at - localStart;
+    clockOffsetMs = Math.abs(measured) > CLOCK_TOLERANCE_MS ? measured : 0;
+    if (clockOffsetMs) console.log('[時計補正] 管理画面との時計差 ' + Math.round(clockOffsetMs / 100) / 10 + '秒 を補正');
+  }
+  lastFetchIssuedAt = issuedAt;
+  lastFetchKey = key;
+  lastFetchStamp = stamp;
+}
+
 function effectiveStart(q) {
-  return (q.question_started_at || 0) + (isLastQuestion(q) ? COUNTDOWN_MS_LAST : COUNTDOWN_MS);
+  return (q.question_started_at || 0) - clockOffsetMs + (isLastQuestion(q) ? COUNTDOWN_MS_LAST : COUNTDOWN_MS);
 }
 
 // ========== 効果音 ==========
@@ -411,9 +440,11 @@ let questionsCache = null;          // 配信済みの問題リスト
 let questionsFetchedStamp = null;   // どの配信(ready)の問題を取得済みか
 
 async function fetchQuiz() {
+  const issuedAt = Date.now();
   const { data: light, error } = await sb.from('quiz_state').select(QUIZ_LIGHT_COLS).eq('id', QUIZ_ROW_ID).maybeSingle();
   if (error) { console.error(error); return null; }
   if (!light) return null;
+  learnClockOffset(light, issuedAt, Date.now()); // v3.4.4: 時計ズレ学習 (状態適用より前に行う)
 
   // ① 待受中でも事前取得してキャッシュを温めておく (第1問の初動を最速化)
   const freshDist = (light.state === 'ready' && questionsFetchedStamp !== light.updated_at);

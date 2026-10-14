@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 同期会クイズ v3.4.3 (2026-07-17) -->
+<!-- 同期会クイズ v3.4.4 (2026-10-14) -->
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -158,7 +158,7 @@ body.preview .preview-badge { display: block; }
 
 /* ============ COUNTDOWN OVERLAY ============ */
 #countdown-overlay {
-  position: fixed; inset: 0; z-index: 900;
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 900;
   display: flex; align-items: center; justify-content: center;
   /* iPadOS等でbackdrop-filterが効かない環境でも確実にマスクされるよう、ほぼ不透明の背景にする */
   background:
@@ -331,7 +331,7 @@ body.preview .preview-badge { display: block; }
 
 /* ============ REVEAL OVERLAY ============ */
 #reveal-overlay {
-  position:fixed; inset:0; z-index:1000;
+  position:fixed; top: 0; right: 0; bottom: 0; left: 0; z-index:1000;
   display:flex; align-items:center; justify-content:center;
   pointer-events:none;
 }
@@ -459,7 +459,7 @@ body.preview .preview-badge { display: block; }
   font-size:13px;
   margin:20px;
 }
-#confetti-canvas { position:fixed; inset:0; pointer-events:none; z-index:999; }
+#confetti-canvas { position:fixed; top: 0; right: 0; bottom: 0; left: 0; pointer-events:none; z-index:999; }
 
 /* ==== 周遊するロゴ ==== */
 .roam-logo {
@@ -509,7 +509,7 @@ body.in-question .roam-logo { display:none; }
   background: linear-gradient(180deg, #dfe6ff 0%, #f3dcf5 55%, #ffd9e8 100%);
 }
 .retro-grid {
-  position: absolute; inset: 0; opacity: 0.5; z-index: 0;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; opacity: 0.5; z-index: 0;
   background-image:
     linear-gradient(rgba(255,120,180,0.22) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255,120,180,0.22) 1px, transparent 1px);
@@ -587,7 +587,7 @@ body.in-question .roam-logo { display:none; }
 
 /* ==== 最終成績発表 ==== */
 #finale-overlay {
-  position: fixed; inset: 0; z-index: 1500;
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 1500;
   background: linear-gradient(-45deg, #2b1a3f, #4a1230, #1c1235, #2b1a3f);
   background-size: 300% 300%;
   animation: bgShift 8s ease infinite;
@@ -1191,8 +1191,8 @@ body.preview .answered-status { bottom: 78px; } /* テストバーと重なら�
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<div class="ver-badge">v3.4.3</div>
-<script src="supabase-config.js?v=44"></script>
-<script src="play.js?v=44"></script>
+<div class="ver-badge">v3.4.4</div>
+<script src="supabase-config.js?v=45"></script>
+<script src="play.js?v=45"></script>
 </body>
 </html>
